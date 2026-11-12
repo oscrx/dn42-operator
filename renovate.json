@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/**"],
+      "groupName": "kubernetes"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "controller-gen in CI",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": ["controller-gen@(?<currentValue>v[0-9.]+)"],
+      "depNameTemplate": "sigs.k8s.io/controller-tools",
+      "datasourceTemplate": "go"
+    }
+  ]
+}

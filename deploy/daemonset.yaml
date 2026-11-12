@@ -24,7 +24,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: bird
-          image: ghcr.io/oscrx/bird2:2.17 # see images/bird/Dockerfile
+          image: ghcr.io/oscrx/bird2:0.1.0 # images/bird, released with the operator (BIRD 2.17)
           securityContext:
             privileged: true
           volumeMounts:

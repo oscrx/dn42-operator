@@ -335,6 +335,23 @@ versions and `case.yaml` with the diff, author and expected outcome.
 - Tag a release so the peers repo workflow's pinned
   `go install .../cmd/peercheck@v0.1.0` resolves (after the repo is public).
 
+## CI and releases
+
+- `.github/workflows/ci.yml` runs on every push and PR:
+  - gofmt, vet, a check that the generated code is current (controller-gen
+    v0.23.0) and the unit tests
+  - `make integration` in a privileged container
+  - `make k3s-test` on pushes to main
+- `.github/workflows/release.yml` runs on a `v*` tag. It builds multi-arch
+  images and pushes them to `ghcr.io/oscrx/dn42-operator` (operator and
+  autopeer) and `ghcr.io/oscrx/bird2`. The same tag is what the peers
+  repo's gate installs with `go install .../cmd/peercheck@<tag>`.
+- Actions are pinned to commit SHAs; `renovate.json` keeps them, Go modules
+  and controller-gen current.
+
+None of this has run on GitHub yet: the workflows pass actionlint and their
+commands pass locally.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
