@@ -6,7 +6,7 @@
 {{$csrf := .Session.CSRF}}{{range .Peers}}<tr><td>{{.Name}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
 <td>{{if .Live}}{{or .BGPState "—"}}{{if eq .Valid "False"}} <span class="err">({{.ValidReason}})</span>{{end}}{{else}}not configured yet{{end}}</td>
 <td>{{or .Handshake "—"}}</td><td>{{or .Routes "—"}}</td>
-<td>{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<form method="post" action="/peer/remove"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button>Remove</button></form>{{end}}</td></tr>{{end}}</table>
+<td>{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<a href="/peer/edit?name={{.Name}}">Edit</a> <form method="post" action="/peer/remove" style="display:inline"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button>Remove</button></form>{{end}}</td></tr>{{end}}</table>
 {{else}}<p>None yet.</p>{{end}}
 <p><a href="/peer/new">Request a new peering</a></p>
 {{template "foot" .}}{{end}}

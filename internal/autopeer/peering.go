@@ -202,3 +202,47 @@ func joinHostPort(host string, port int) string {
 	}
 	return fmt.Sprintf("%s:%d", host, port)
 }
+
+// UpdatePeer changes the peer-controlled fields of an existing autopeer
+// (public key, endpoint, link-local). Name, ASN, listen port and link
+// values stay. others are all other known peers (repo and pending).
+func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, others []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
+	if !id.May(cur.Spec.ASN) {
+		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", cur.Spec.ASN)}
+	}
+	if cur.Spec.KeyRef != "" {
+		return nil, nil, &FieldError{"form", "this peering was set up by hand and can't be edited here"}
+	}
+	obj := cur.DeepCopy()
+	obj.Spec.PublicKey = strings.TrimSpace(req.PublicKey)
+	obj.Spec.Endpoint = strings.TrimSpace(req.Endpoint)
+	obj.Spec.Neighbor = strings.TrimSpace(req.Neighbor)
+	if specEqual(obj, cur) {
+		return nil, nil, &FieldError{"form", "nothing changed"}
+	}
+	pp, verr := peer.FromObject(obj)
+	if verr != nil {
+		return nil, nil, &FieldError{fieldFor(verr.Message), verr.Message}
+	}
+	if pp.Neighbor == cfg.routerLinkLocal() {
+		return nil, nil, &FieldError{"neighbor", fmt.Sprintf("%s is our address; pick another link-local address", pp.Neighbor)}
+	}
+	var all []dn42v1.DN42Peer
+	for _, o := range others {
+		if o.Name != cur.Name {
+			all = append(all, o)
+		}
+	}
+	all = append(all, *obj)
+	all[len(all)-1].CreationTimestamp = metav1.NewTime(time.Now().Add(100 * 365 * 24 * time.Hour))
+	for _, r := range peer.ValidateSet(all) {
+		if r.Object.Name == obj.Name && r.Err != nil {
+			return nil, nil, &FieldError{fieldFor(r.Err.Message), r.Err.Message}
+		}
+	}
+	return obj, pp, nil
+}
+
+func specEqual(a, b *dn42v1.DN42Peer) bool {
+	return a.Spec.PublicKey == b.Spec.PublicKey && a.Spec.Endpoint == b.Spec.Endpoint && a.Spec.Neighbor == b.Spec.Neighbor
+}

@@ -72,6 +72,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /peer/new", s.newPeer)
 	mux.HandleFunc("POST /peer", s.submitPeer)
 	mux.HandleFunc("POST /peer/remove", s.removePeer)
+	mux.HandleFunc("GET /peer/edit", s.editPeerForm)
+	mux.HandleFunc("POST /peer/edit", s.editPeer)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
@@ -384,23 +386,13 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
 }
 
-func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
-	log := ctrl.Log.WithName("autopeer")
-	sess := s.session(r)
-	if sess == nil {
-		s.fail(w, http.StatusUnauthorized, "Please log in first.")
-		return
-	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
-	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
-		s.fail(w, http.StatusForbidden, "The form expired, please reload it.")
-		return
-	}
-	name := r.PostFormValue("name")
+// ownAutopeer finds an autopeer of the login by name that has no open PR,
+// or writes the error page and returns nil.
+func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Session, name string) (*dn42v1.DN42Peer, string, []dn42v1.DN42Peer, []Pending) {
 	peers, err := s.Repo.ListPeers(r.Context())
 	if err != nil {
 		s.fail(w, http.StatusServiceUnavailable, "Could not load the peers, please try later.")
-		return
+		return nil, "", nil, nil
 	}
 	var target *dn42v1.DN42Peer
 	for i := range peers {
@@ -411,23 +403,50 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 	// Same answer for "doesn't exist" and "not yours".
 	if target == nil || !sess.Identity.May(target.Spec.ASN) {
 		s.fail(w, http.StatusNotFound, "No such peering of yours.")
-		return
+		return nil, "", nil, nil
 	}
 	if target.Spec.KeyRef != "" {
-		s.fail(w, http.StatusForbidden, "This peering was set up by hand; ask AS"+strconv.FormatInt(s.Cfg.Router.ASN, 10)+" to remove it.")
-		return
+		s.fail(w, http.StatusForbidden, "This peering was set up by hand; ask AS"+strconv.FormatInt(s.Cfg.Router.ASN, 10)+" to change it.")
+		return nil, "", nil, nil
 	}
 	path := PeerFileName(s.Cfg.GitHub.PeersDir, target)
 	pending, err := s.Repo.PendingPeers(r.Context())
 	if err != nil {
 		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
-		return
+		return nil, "", nil, nil
 	}
 	for _, pd := range pending {
 		if pd.Path == path {
 			s.fail(w, http.StatusConflict, "There is already an open request for this peering: "+pd.URL)
-			return
+			return nil, "", nil, nil
 		}
+	}
+	return target, path, peers, pending
+}
+
+func (s *Server) postForm(w http.ResponseWriter, r *http.Request) *Session {
+	sess := s.session(r)
+	if sess == nil {
+		s.fail(w, http.StatusUnauthorized, "Please log in first.")
+		return nil
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
+		s.fail(w, http.StatusForbidden, "The form expired, please reload it.")
+		return nil
+	}
+	return sess
+}
+
+func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
+	log := ctrl.Log.WithName("autopeer")
+	sess := s.postForm(w, r)
+	if sess == nil {
+		return
+	}
+	target, path, _, _ := s.ownAutopeer(w, r, sess, r.PostFormValue("name"))
+	if target == nil {
+		return
 	}
 	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
 		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
@@ -448,4 +467,79 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Info("peer removal requested", "peer", target.Name, "asn", target.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
 	s.render(w, http.StatusOK, "removed.html", map[string]any{"Session": sess, "PR": prURL, "Name": target.Name})
+}
+
+func (s *Server) editPeerForm(w http.ResponseWriter, r *http.Request) {
+	sess := s.session(r)
+	if sess == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	target, _, _, _ := s.ownAutopeer(w, r, sess, r.URL.Query().Get("name"))
+	if target == nil {
+		return
+	}
+	s.render(w, http.StatusOK, "edit.html", map[string]any{"Session": sess, "Peer": target, "Form": map[string]string{
+		"publicKey": target.Spec.PublicKey, "endpoint": target.Spec.Endpoint, "neighbor": target.Spec.Neighbor}})
+}
+
+func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
+	log := ctrl.Log.WithName("autopeer")
+	sess := s.postForm(w, r)
+	if sess == nil {
+		return
+	}
+	target, path, peers, pending := s.ownAutopeer(w, r, sess, r.PostFormValue("name"))
+	if target == nil {
+		return
+	}
+	form := map[string]string{}
+	for _, k := range []string{"publicKey", "endpoint", "neighbor"} {
+		form[k] = r.PostFormValue(k)
+	}
+	others := append([]dn42v1.DN42Peer(nil), peers...)
+	for _, pd := range pending {
+		if pd.Peer != nil {
+			others = append(others, *pd.Peer)
+		}
+	}
+	obj, p, err := UpdatePeer(s.Cfg, &sess.Identity, target, Request{PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"]}, others)
+	var fe *FieldError
+	if errors.As(err, &fe) {
+		s.render(w, http.StatusUnprocessableEntity, "edit.html", map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": fe.Message})
+		return
+	} else if err != nil {
+		s.fail(w, http.StatusInternalServerError, "Could not update the peer.")
+		return
+	}
+	content, err := PeerYAML(obj)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
+		return
+	}
+	side, err := RenderPeerSide(s.Cfg, p)
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
+		return
+	}
+	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
+		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		return
+	}
+	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
+		Branch:  fmt.Sprintf("autopeer/edit-%d-%s-%s", obj.Spec.ASN, obj.Name, randomString(4)),
+		Path:    path,
+		Content: content,
+		Title:   fmt.Sprintf("Update peer AS%d %s", obj.Spec.ASN, obj.Name),
+		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: `%s`\n",
+			obj.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
+	})
+	if err != nil {
+		log.Error(err, "open update PR", "peer", obj.Name)
+		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
+		return
+	}
+	log.Info("peer update requested", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
+	s.render(w, http.StatusOK, "done.html", map[string]any{
+		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
 }

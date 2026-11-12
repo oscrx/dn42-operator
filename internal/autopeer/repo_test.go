@@ -135,6 +135,12 @@ func (g *fakeGitHub) handler() http.Handler {
 				http.Error(w, "no branch", 422)
 				return
 			}
+			// Like GitHub: updating an existing file needs its sha.
+			path := strings.TrimPrefix(p, "/contents/")
+			if _, exists := g.files[path]; exists && in["sha"] != "blob-"+path {
+				http.Error(w, "sha wasn't supplied", 422)
+				return
+			}
 			g.added[in["branch"]+"/"+strings.TrimPrefix(p, "/contents/")] = string(b)
 			w.WriteHeader(201)
 			w.Write([]byte("{}"))
@@ -218,6 +224,14 @@ func TestGitHubApp(t *testing.T) {
 	if !fg.deleted["autopeer/rm/peers/4242420001-old.yaml"] {
 		t.Errorf("deleted: %v", fg.deleted)
 	}
+	// Updating an existing file sends its sha.
+	if _, err := gh.OpenPR(t.Context(), PullRequest{Branch: "autopeer/edit", Path: "peers/4242420001-old.yaml", Content: []byte("v2"), Title: "Update"}); err != nil {
+		t.Fatal(err)
+	}
+	if fg.added["autopeer/edit/peers/4242420001-old.yaml"] != "v2" {
+		t.Errorf("update not written: %v", fg.added)
+	}
+
 	// Now a parseable pending peer too.
 	good, _ := PeerYAML(func() *dn42v1.DN42Peer { p := existingPeer("new", 4242420003, 20003, "fe80::3"); return &p }())
 	fg.added["autopeer/x/peers/4242420002-new.yaml"] = string(good)

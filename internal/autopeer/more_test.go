@@ -165,3 +165,53 @@ func TestRemovePeer(t *testing.T) {
 		t.Errorf("PRs: %d", len(a.repo.PRs))
 	}
 }
+
+func TestEditPeer(t *testing.T) {
+	a := loggedIn(t, nil)
+	mine := existingPeer("mine", 4242420010, 20010, "fe80::1")
+	mine.Spec.Link = &dn42v1.LinkValues{Latency: 3, Bandwidth: 25, Crypto: 34}
+	neighbor := existingPeer("nb", 4242420010, 20011, "fe80::2")
+	hand := existingPeer("hand", 4242420011, 20012, "fe80::3")
+	hand.Spec.KeyRef = "hand"
+	for _, p := range []*dn42v1.DN42Peer{&mine, &neighbor, &hand} {
+		b, _ := PeerYAML(p)
+		a.repo.Files[PeerFileName("peers", p)] = b
+	}
+	if code, body := a.get("/peer/edit?name=mine"); code != 200 || !strings.Contains(body, `value="fe80::1"`) {
+		t.Fatalf("edit form: %d\n%s", code, body)
+	}
+	if code, _ := a.get("/peer/edit?name=hand"); code != http.StatusForbidden {
+		t.Errorf("hand-managed edit form: %d", code)
+	}
+	csrf := a.csrf()
+	edit := func(pub, ep, nb string) (int, string) {
+		return a.post("/peer/edit", url.Values{"csrf": {csrf}, "name": {"mine"}, "publicKey": {pub}, "endpoint": {ep}, "neighbor": {nb}})
+	}
+	if code, body := edit(theirPub, "", "fe80::1"); code != 422 || !strings.Contains(body, "nothing changed") {
+		t.Errorf("no-op edit: %d", code)
+	}
+	if code, body := edit(theirPub, "", "fe80::2"); code != 422 || !strings.Contains(body, "neighbor fe80::2") {
+		t.Errorf("neighbor clash: %d", code)
+	}
+	if code, _ := edit("bad", "", "fe80::1"); code != 422 {
+		t.Errorf("bad key: %d", code)
+	}
+	newKey := "xAEAuM4uK5+j5kwRGIW6KYEsJVy0/6Awc4x8mpmKuSw="
+	if code, body := edit(newKey, "[2001:db8::7]:51820", "fe80::1"); code != 200 || !strings.Contains(body, "ListenPort = 51820") {
+		t.Fatalf("edit: %d\n%s", code, body)
+	}
+	pr := a.repo.PRs[0]
+	obj, err := ParsePeerFile(pr.Content)
+	if err != nil || pr.Delete || pr.Path != "peers/4242420010-mine.yaml" || !strings.HasPrefix(pr.Branch, "autopeer/edit-") {
+		t.Fatalf("PR %+v %v", pr, err)
+	}
+	// Peer-controlled fields changed; name, ASN, port and link values kept.
+	if obj.Spec.PublicKey != newKey || obj.Spec.Endpoint != "[2001:db8::7]:51820" || *obj.Spec.ListenPort != 20010 ||
+		obj.Spec.Link == nil || obj.Spec.Link.Latency != 3 || obj.Name != "mine" || obj.Spec.KeyRef != "" {
+		t.Errorf("updated spec: %+v", obj.Spec)
+	}
+	// While that PR is open, no second edit or removal.
+	if code, _ := edit(theirPub, "", "fe80::9"); code != http.StatusConflict {
+		t.Errorf("edit while pending: %d", code)
+	}
+}

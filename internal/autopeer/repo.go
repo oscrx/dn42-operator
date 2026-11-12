@@ -342,12 +342,26 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr PullRequest) (string, error) 
 		}, nil); err != nil {
 			return "", fmt.Errorf("delete file: %w", err)
 		}
-	} else if err := g.api(ctx, http.MethodPut, g.repoPath("/contents/%s", escapePath(pr.Path)), map[string]string{
-		"message": pr.Title,
-		"content": base64.StdEncoding.EncodeToString(pr.Content),
-		"branch":  pr.Branch,
-	}, nil); err != nil {
-		return "", fmt.Errorf("add file: %w", err)
+	} else {
+		put := map[string]string{
+			"message": pr.Title,
+			"content": base64.StdEncoding.EncodeToString(pr.Content),
+			"branch":  pr.Branch,
+		}
+		// Updating an existing file needs its blob sha.
+		var cur contentEntry
+		err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(pr.Path), url.QueryEscape(pr.Branch)), nil, &cur)
+		var he *HTTPError
+		switch {
+		case err == nil:
+			put["sha"] = cur.SHA
+		case errors.As(err, &he) && he.Status == http.StatusNotFound:
+		default:
+			return "", fmt.Errorf("find file: %w", err)
+		}
+		if err := g.api(ctx, http.MethodPut, g.repoPath("/contents/%s", escapePath(pr.Path)), put, nil); err != nil {
+			return "", fmt.Errorf("write file: %w", err)
+		}
 	}
 	var out struct {
 		HTMLURL string `json:"html_url"`

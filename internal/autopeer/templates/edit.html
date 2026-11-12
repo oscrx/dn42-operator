@@ -1,0 +1,13 @@
+{{define "edit.html"}}{{template "head" .}}
+<h2>Edit {{.Peer.Name}} (AS{{.Peer.Spec.ASN}})</h2>
+{{with .Error}}<p class="err">{{.}}</p>{{end}}
+<p>Name, ASN and our port stay the same. The change goes through a pull request like a new peering.</p>
+<form method="post" action="/peer/edit">
+<input type="hidden" name="csrf" value="{{.Session.CSRF}}">
+<input type="hidden" name="name" value="{{.Peer.Name}}">
+<label for="publicKey">Your WireGuard public key</label><input id="publicKey" name="publicKey" value="{{index .Form "publicKey"}}" required maxlength="44">
+<label for="endpoint">Your endpoint (optional)</label><input id="endpoint" name="endpoint" value="{{index .Form "endpoint"}}">
+<label for="neighbor">Your link-local address</label><input id="neighbor" name="neighbor" value="{{index .Form "neighbor"}}" required>
+<button>Submit change</button>
+</form>
+{{template "foot" .}}{{end}}

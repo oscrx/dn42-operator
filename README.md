@@ -263,9 +263,12 @@ The flow:
 5. **Status**: the home page lists the login's peers from the repo, plus
    new ones still in an open PR. It shows live state (BGP state, handshake,
    routes, Valid) from the cluster when `kubernetes.enabled`.
-6. **Removal**: an autopeer (no `keyRef`) gets a Remove button, which opens
-   a PR deleting its file. Hand-managed peers can't be removed through the
-   app; the gate enforces the same rule.
+6. **Edit and removal**: an autopeer (no `keyRef`) gets Edit and Remove
+   buttons. Edit changes only the peer's own fields (public key, endpoint,
+   link-local address), keeping name, ASN, our port and link values, and
+   opens a PR updating the file. Remove opens a PR deleting it.
+   Hand-managed peers can't be changed through the app; the gate enforces
+   the same rule.
 
 Peers in open PRs count as taken: a second request can't reuse their name,
 port or ASN + neighbor while the first is in review, and a peer with an
@@ -328,8 +331,7 @@ versions and `case.yaml` with the diff, author and expected outcome.
 
 ## Not done yet
 
-- autopeer: the provider checks above; editing an existing autopeer (today:
-  remove and request again).
+- autopeer: the provider checks above.
 - Tag a release so the peers repo workflow's pinned
   `go install .../cmd/peercheck@v0.1.0` resolves (after the repo is public).
 
