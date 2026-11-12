@@ -1,0 +1,96 @@
+# Test variant of deploy/: images imported locally, a test bird.conf, an
+# init container that creates vrf-dn42 (Talos does that on real nodes) and an
+# IPv4 Service (the test cluster is single-stack).
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: dn42-bird-conf, namespace: dn42}
+data:
+  bird.conf: |
+    router id 10.0.0.1;
+    log stderr all;
+    protocol device { scan time 2; }
+    function dn42_import(int lat; int bw; int crypto) -> bool { return true; }
+    function dn42_export(int lat; int bw; int crypto) -> bool { return true; }
+    template bgp dnpeers { vrf "vrf-dn42"; local as 4242423818; ipv6 { import table on; }; }
+    include "/etc/bird/peers/*.conf";
+---
+apiVersion: v1
+kind: Service
+metadata: {name: dn42-endpoint, namespace: dn42}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: dn42-router
+    dn42.oscarr.nl/leader: "true"
+  ports:
+    - {name: placeholder, protocol: UDP, port: 20000}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: {name: dn42-router, namespace: dn42}
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: dn42-router}
+  updateStrategy:
+    rollingUpdate: {maxUnavailable: 1}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dn42-router}
+    spec:
+      serviceAccountName: dn42-operator
+      nodeSelector: {dn42.oscarr.nl/router: "true"}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 30
+      initContainers:
+        - name: vrf
+          image: BIRD_IMG
+          imagePullPolicy: Never
+          command: [sh, -c, "ip link show vrf-dn42 >/dev/null 2>&1 || ip link add vrf-dn42 type vrf table 42; ip link set vrf-dn42 up"]
+          securityContext: {privileged: true}
+      containers:
+        - name: bird
+          image: BIRD_IMG
+          imagePullPolicy: Never
+          securityContext: {privileged: true}
+          volumeMounts:
+            - {name: bird-conf, mountPath: /etc/bird/bird.conf, subPath: bird.conf, readOnly: true}
+            - {name: peers, mountPath: /etc/bird/peers, readOnly: true}
+            - {name: run, mountPath: /run/bird}
+        - name: operator
+          image: OPERATOR_IMG
+          imagePullPolicy: Never
+          args: [--endpoint-service=dn42-endpoint, --status-interval=5s]
+          env:
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+          securityContext: {privileged: true}
+          readinessProbe:
+            httpGet: {path: /readyz, port: 9843}
+            periodSeconds: 2
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9843}
+          volumeMounts:
+            - {name: peers, mountPath: /etc/bird/peers}
+            - {name: run, mountPath: /run/bird}
+      volumes:
+        - {name: bird-conf, configMap: {name: dn42-bird-conf}}
+        - {name: peers, emptyDir: {}}
+        - {name: run, emptyDir: {}}
+---
+apiVersion: dn42.oscarr.nl/v1alpha1
+kind: DN42Peer
+metadata: {name: aa, namespace: dn42}
+spec:
+  asn: 4242420001
+  publicKey: 08dzv758I5APqJizgw/W6O+FceyHSCbx/L/GZ3TL5TQ=
+  neighbor: fe80::1
+---
+apiVersion: dn42.oscarr.nl/v1alpha1
+kind: DN42Peer
+metadata: {name: bb, namespace: dn42}
+spec:
+  asn: 4242420002
+  publicKey: xAEAuM4uK5+j5kwRGIW6KYEsJVy0/6Awc4x8mpmKuSw=
+  neighbor: fe80::2

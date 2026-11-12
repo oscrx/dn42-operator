@@ -1,5 +1,6 @@
 # Least privilege: the peers, their status, one Secret, one Service, one
-# ConfigMap and the Lease, all in the dn42 namespace.
+# ConfigMap, the router pods' leader label and the Lease, all in the dn42
+# namespace.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -33,6 +34,11 @@ rules:
     resources: [configmaps]
     resourceNames: [dn42-operator-control]
     verbs: [get]
+  # The leader label on the router pods (own pod, and clearing a stale
+  # leader). Pod names are generated, so this can't use resourceNames.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, patch]
   - apiGroups: [coordination.k8s.io]
     resources: [leases]
     verbs: [create]

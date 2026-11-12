@@ -48,12 +48,15 @@ spec:
               valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - name: POD_NAME # the operator sets dn42.oscarr.nl/leader on its own pod
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
           securityContext:
             privileged: true # netlink, wireguard, /proc/sys in the host netns
           ports:
             - {name: metrics, containerPort: 9842}
-          # Ready only on the leader with a completed pass, so the
-          # externalTrafficPolicy: Local Service follows the lease.
+          # Ready = healthy in its role (leader or follower) with the leader
+          # label confirmed, so rolling updates proceed on followers too. The
+          # endpoint Service selects dn42.oscarr.nl/leader=true.
           readinessProbe:
             httpGet: {path: /readyz, port: 9843}
             periodSeconds: 5

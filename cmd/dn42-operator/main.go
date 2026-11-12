@@ -53,6 +53,8 @@ func main() {
 		metricsAddr     = flag.String("metrics-bind-address", ":9842", "metrics address (host network: pick a free port)")
 		probeAddr       = flag.String("health-probe-bind-address", ":9843", "health probe address")
 		cleanupShutdown = flag.Bool("cleanup-on-shutdown", true, "remove managed links before releasing the lease on shutdown")
+		podName         = flag.String("pod-name", os.Getenv("POD_NAME"), "own pod name, for the leader label (empty: no label)")
+		leaderLabel     = flag.String("leader-label", ourctrl.DefaultLeaderLabel, "pod label the endpoint Service selects the leader by")
 		statusInterval  = flag.Duration("status-interval", 30*time.Second, "status and metrics interval")
 	)
 	opts := zap.Options{}
@@ -68,6 +70,7 @@ func main() {
 		service: *service, controlCM: *controlCM, maxDeleteFrac: *maxDeleteFrac,
 		metricsAddr: *metricsAddr, probeAddr: *probeAddr,
 		cleanupShutdown: *cleanupShutdown, statusInterval: *statusInterval,
+		podName: *podName, leaderLabel: *leaderLabel,
 	}); err != nil {
 		log.Error(err, "exiting")
 		os.Exit(1)
@@ -81,6 +84,7 @@ type runConfig struct {
 	metricsAddr, probeAddr                                    string
 	cleanupShutdown                                           bool
 	statusInterval                                            time.Duration
+	podName, leaderLabel                                      string
 }
 
 func run(c runConfig) error {
@@ -122,6 +126,11 @@ func run(c runConfig) error {
 		return err
 	}
 
+	var labeler *ourctrl.PodLabeler
+	if c.podName != "" {
+		labeler = &ourctrl.PodLabeler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(),
+			Namespace: c.namespace, PodName: c.podName, Label: c.leaderLabel}
+	}
 	birdClient := &bird.Client{Socket: c.birdSocket, Timeout: 10 * time.Second}
 	state := &ourctrl.RoleState{}
 	r := &ourctrl.Reconciler{
@@ -140,6 +149,7 @@ func run(c runConfig) error {
 		Renderer:          bird.Renderer{Template: c.birdTemplate},
 		Resolve:           ourctrl.DefaultResolver,
 		State:             state,
+		Labeler:           labeler,
 		Events:            make(chan struct{}, 1),
 		StatusNow:         make(chan struct{}, 1),
 	}

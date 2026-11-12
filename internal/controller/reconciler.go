@@ -97,6 +97,8 @@ type Reconciler struct {
 	Resolve  Resolver
 
 	State *RoleState
+	// Labeler keeps the leader label on our own pod; nil disables it.
+	Labeler *PodLabeler
 	// Events receives a value whenever a pass should run.
 	Events chan struct{}
 	// StatusNow is signalled after each pass so status is written promptly.
@@ -138,11 +140,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconc
 	return reconcile.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
-// Ready reports whether this replica should receive traffic: it is the
-// leader and the last pass completed.
+// Ready reports whether this replica is healthy in its role: the last pass
+// completed and, with a Labeler, the leader label on our pod is known to
+// match the role. A healthy follower is Ready too (so DaemonSet rolling
+// updates proceed); the endpoint Service selects on the leader label, so it
+// still receives no traffic.
 func (r *Reconciler) Ready() error {
-	if r.State.Get() != RoleLeader {
-		return fmt.Errorf("not the leader (%s)", r.State.Get())
+	role := r.State.Get()
+	if role != RoleLeader && role != RoleFollower {
+		return fmt.Errorf("role is %s", role)
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -150,7 +156,13 @@ func (r *Reconciler) Ready() error {
 		return errors.New("no pass completed yet")
 	}
 	if r.lastPass != nil {
-		return fmt.Errorf("last pass failed: %w", r.lastPass)
+		return fmt.Errorf("last %s pass failed: %w", role, r.lastPass)
+	}
+	if r.Labeler != nil {
+		v, ok := r.Labeler.Confirmed()
+		if !ok || v != (role == RoleLeader) {
+			return fmt.Errorf("leader label on own pod not confirmed for role %s", role)
+		}
 	}
 	return nil
 }
@@ -164,6 +176,10 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	switch r.State.Get() {
 	case RoleLeader:
 		err = r.leaderPass(ctx)
+		if r.Labeler != nil {
+			// Label whatever the pass result: readiness reflects health.
+			err = errors.Join(err, r.Labeler.ClearOthers(ctx), r.Labeler.Set(ctx, true))
+		}
 	case RoleFollower:
 		err = r.teardownLocked(ctx)
 	default:
@@ -207,6 +223,9 @@ func (r *Reconciler) teardownLocked(ctx context.Context) error {
 		errs = append(errs, fmt.Errorf("bird: %w", err))
 	} else if len(removed) > 0 {
 		log.Info("removed peer configs (standing down)", "peers", removed)
+	}
+	if r.Labeler != nil {
+		errs = append(errs, r.Labeler.Set(ctx, false))
 	}
 	return errors.Join(errs...)
 }

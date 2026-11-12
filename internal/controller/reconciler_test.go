@@ -241,8 +241,8 @@ func TestFollowerAndUnknown(t *testing.T) {
 	if _, ok := u.nd.Links["wg-foreign"]; !ok {
 		t.Error("follower deleted a foreign link")
 	}
-	if u.r.Ready() == nil {
-		t.Error("follower is ready")
+	if err := u.r.Ready(); err != nil {
+		t.Errorf("healthy follower not ready: %v", err)
 	}
 }
 
@@ -352,5 +352,66 @@ func TestStatus(t *testing.T) {
 	}
 	if u.r.Ready() == nil {
 		t.Error("ready with bird down")
+	}
+}
+
+func pod(name, leader string) *corev1.Pod {
+	p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name,
+		Labels: map[string]string{"app.kubernetes.io/name": "dn42-router"}}}
+	if leader != "" {
+		p.Labels[DefaultLeaderLabel] = leader
+	}
+	return p
+}
+
+func TestLeaderLabel(t *testing.T) {
+	a := mkPeer("iedon", 4242422189, 0, "fe80::2189:177", 0)
+	u := newUnit(t, a, keySecret(t, "autopeer"), endpointService(),
+		pod("router-a", ""), pod("router-b", "true"), pod("router-c", "false"))
+	u.r.Labeler = &PodLabeler{Client: u.c, Reader: u.c, Namespace: ns, PodName: "router-a", Label: DefaultLeaderLabel}
+	label := func(name string) string {
+		var p corev1.Pod
+		if err := u.c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Labels[DefaultLeaderLabel]
+	}
+
+	// Unknown role: not ready, labels untouched.
+	u.r.State.Set(RoleUnknown)
+	u.mustPass()
+	if u.r.Ready() == nil || label("router-b") != "true" {
+		t.Error("unknown role ready or labels changed")
+	}
+
+	// Leader: own label true, the stale leader label on b is cleared.
+	u.r.State.Set(RoleLeader)
+	u.mustPass()
+	if label("router-a") != "true" || label("router-b") != "false" || label("router-c") != "false" {
+		t.Errorf("labels: a=%s b=%s c=%s", label("router-a"), label("router-b"), label("router-c"))
+	}
+	if err := u.r.Ready(); err != nil {
+		t.Errorf("leader not ready: %v", err)
+	}
+
+	// Follower: own label false, still ready (healthy).
+	u.r.State.Set(RoleFollower)
+	u.mustPass()
+	if label("router-a") != "false" {
+		t.Error("follower kept the leader label")
+	}
+	if err := u.r.Ready(); err != nil {
+		t.Errorf("follower not ready: %v", err)
+	}
+
+	// The role changes but the label can't be written: not ready, so the
+	// pod never sits in the Service with a label that doesn't match.
+	u.r.Labeler.PodName = "gone"
+	u.r.State.Set(RoleLeader)
+	if err := u.pass(); err == nil {
+		t.Error("pass ok without the label")
+	}
+	if u.r.Ready() == nil {
+		t.Error("ready without a confirmed label")
 	}
 }

@@ -10,12 +10,13 @@ metadata:
     lbipam.cilium.io/ips: "2a05:f080:0:38ff::4242" # example
 spec:
   type: LoadBalancer
-  # Announced only from the node whose router pod is ready, i.e. the leader.
+  # Announced only from the node with a ready, selected pod: the leader.
   externalTrafficPolicy: Local
   ipFamilies: [IPv6]
   ipFamilyPolicy: SingleStack
   selector:
     app.kubernetes.io/name: dn42-router
+    dn42.oscarr.nl/leader: "true" # set by the operator on the leader's pod only
   ports:
     - name: placeholder
       protocol: UDP

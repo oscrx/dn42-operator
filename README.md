@@ -120,7 +120,9 @@ pass every 60s. Status and metrics are written every 30s.
 
 - `namespace.yaml`: the namespace with `pod-security.kubernetes.io/enforce: privileged`.
 - `rbac.yaml`: read/watch `DN42Peer`, write its status, read the one key
-  Secret, patch the one Service, read the control ConfigMap, and the Lease.
+  Secret, patch the one Service, read the control ConfigMap, get/list/patch
+  pods (the leader label; pod names are generated, so no resourceNames), and
+  the Lease.
 - `daemonset.yaml`: nodes labelled `dn42.oscarr.nl/router=true`, host network,
   privileged. It has two containers:
   - `bird`, with a static `bird.conf` that includes `/etc/bird/peers/*.conf`
@@ -128,7 +130,8 @@ pass every 60s. Status and metrics are written every 30s.
   - `operator`
   
   The two share `/etc/bird/peers` and `/run/bird` as emptyDirs.
-  `images/bird/Dockerfile` is a minimal BIRD image.
+  `images/bird/Dockerfile` is the BIRD image (`make bird-image`); the
+  integration tests run on it too.
 - `service-endpoint.yaml`: the floating LoadBalancer endpoint with
   `externalTrafficPolicy: Local`. Keep a placeholder port in git and tell
   ArgoCD to ignore `spec.ports`.
@@ -140,12 +143,17 @@ without `keyRef`.
 ### Leader election
 
 Every router node runs the pod. A Lease (`dn42-operator`, identity = node
-name) picks the active one:
+name) picks the active one, and the operator labels its own pod
+`dn42.oscarr.nl/leader=true|false`. The endpoint Service selects
+`dn42.oscarr.nl/leader: "true"`, so with `externalTrafficPolicy: Local` the
+LB address is announced only from the leader's node.
 
-- **leader**: builds everything. `/readyz` is ok once a pass completed, so the
-  `Local` Service is announced only from the leader's node.
+- **leader**: builds everything, sets its label to `true` and clears the
+  label on any other pod still marked leader (one that lost the lease without
+  reaching the API).
 - **follower** (the lease is held by someone else): removes all managed links
-  and peer snippets, so BIRD has only its static config. It is not ready.
+  and peer snippets, so BIRD has only its static config, and sets its label to
+  `false`.
 - **just started**, lease not seen yet: changes nothing. A restarted leader
   takes its own lease back immediately (same identity), so a restart doesn't
   flap the tunnels.
@@ -154,12 +162,29 @@ name) picks the active one:
   links are removed and then the lease is released, so a key is never live on
   two nodes.
 
+`/readyz` means healthy in the current role: the last pass worked and the
+API server accepted the label that matches the role. Followers are Ready too,
+so DaemonSet rolling updates proceed. If the label can't be written, the pod
+is not Ready, so it never sits in the Service with a label that doesn't match
+its role. Without `POD_NAME` there is no label; readiness is then just
+"healthy", and the Service must not select on the label.
+
+`make k3s-test` proves this on a throwaway three-node k3s in Docker (server
+plus two router agents):
+
+- a rolling update completes
+- only the leader is an endpoint and has tunnels
+- after a hard stop of the leader's node, the other node takes over (about
+  20s: lease expiry plus probes)
+- the returning node comes back as a follower
+
 ### Flags
 
 `--namespace` (`POD_NAMESPACE`), `--identity` (`NODE_NAME`), `--vrf`
 (`vrf-dn42`, must exist; it is never created), `--bird-socket`,
 `--peers-dir`, `--bird-template` (`dnpeers`), `--endpoint-service`,
-`--control-configmap`, `--max-delete-fraction`, `--metrics-bind-address`
+`--control-configmap`, `--max-delete-fraction`, `--pod-name` (`POD_NAME`),
+`--leader-label`, `--metrics-bind-address`
 (`:9842`), `--health-probe-bind-address` (`:9843`). The pod uses the host
 network, so pick free ports.
 
@@ -178,7 +203,8 @@ network, so pick free ports.
 ```
 make generate     # deepcopy + CRD (controller-gen)
 make test         # unit tests, any OS
-make integration  # Linux tests in a privileged container
+make integration  # Linux tests in a privileged container, on the BIRD image
+make k3s-test     # rolling update + failover on a 3-node k3s in Docker
 make image
 ```
 
@@ -201,9 +227,6 @@ They need `--privileged` and must not run on a host.
 - Latency measurement when `spec.link` is unset (`status.measuredLatency`);
   defaults are used.
 - `cmd/autopeer`, the web front end.
-- With a standby node, a DaemonSet rolling update stalls on the follower,
-  which is never ready. That needs a different readiness or Service-selection
-  scheme before the standby exists.
 
 ## License
 
