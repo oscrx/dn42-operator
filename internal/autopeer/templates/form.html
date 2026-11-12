@@ -1,0 +1,17 @@
+{{define "form.html"}}{{template "head" .}}
+<h2>New peering</h2>
+{{with .Error}}<p class="err">{{.}}</p>{{end}}
+<form method="post" action="/peer">
+<input type="hidden" name="csrf" value="{{.Session.CSRF}}">
+<label for="asn">Your ASN</label>
+<select id="asn" name="asn">{{$sel := index .Form "asn"}}{{range .Session.Identity.ASNs}}<option value="{{.}}"{{if eq (printf "%d" .) $sel}} selected{{end}}>AS{{.}}</option>{{end}}</select>
+<label for="name">Name</label><input id="name" name="name" value="{{index .Form "name"}}" required maxlength="12" pattern="[a-z][a-z0-9]{0,11}">
+<small>1-12 lowercase letters/digits, e.g. your network name plus a location. Our interface will be wg-&lt;name&gt;.</small>
+<label for="publicKey">Your WireGuard public key</label><input id="publicKey" name="publicKey" value="{{index .Form "publicKey"}}" required maxlength="44">
+<label for="endpoint">Your endpoint (optional)</label><input id="endpoint" name="endpoint" value="{{index .Form "endpoint"}}" placeholder="[2001:db8::1]:23818 or host.example.net:23818">
+<small>Without it, you connect to us and we only answer.</small>
+<label for="neighbor">Your link-local address</label><input id="neighbor" name="neighbor" value="{{index .Form "neighbor"}}" required placeholder="fe80::1234">
+<small>Used as the BGP neighbor. Ours is shown after submitting.</small>
+<button>Submit</button>
+</form>
+{{template "foot" .}}{{end}}

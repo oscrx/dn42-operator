@@ -1,0 +1,82 @@
+# Example autopeer config. Everything marked CHECK is unverified: the
+# provider URLs and especially which claims carry the ASN or mntner must be
+# confirmed with each provider (and a client registered) before use.
+listen: ":8080"
+publicURL: https://dn42.oscarr.nl        # second host: https://autopeer.oscrx.dn42
+cookieKeyFile: /secrets/cookie-key       # 32 random bytes or their base64
+sessionTTL: 1h
+
+router:
+  asn: 4242423818
+  name: oscrx
+  endpointHost: "2a05:f080:0:38ff::4242" # floating LB /128 (CHECK: final IP)
+  publicKey: REPLACE_WITH_SHARED_AUTOPEER_PUBLIC_KEY=
+  linkLocal: fe80::3818
+
+registry:
+  path: /registry                        # clone of git.dn42.dev/dn42/registry (git-sync sidecar)
+  refresh: 10m                           # reload from disk
+  pull: false                            # true: run git pull itself (needs git in the image)
+
+github:
+  owner: oscrx
+  repo: dn42-peers
+  baseBranch: main
+  peersDir: peers
+  appID: 0                               # the autopeer GitHub App
+  installationID: 0
+  privateKeyFile: /secrets/github-app.pem
+
+kubernetes:
+  enabled: true                          # status page; read-only on dn42peers
+  namespace: dn42
+
+providers:
+  # Kioubit Authentication Services (AS4242423914). OIDC through its control
+  # panel; activating a domain means messaging Kioubit on IRC.
+  - name: kioubit
+    displayName: Kioubit
+    issuer: https://CHECK.kioubit.example     # CHECK: issuer URL
+    clientID: CHECK
+    clientSecretFile: /secrets/kioubit-client-secret
+    scopes: [openid]                          # CHECK: scope that releases the ASN
+    claims:
+      subject: sub
+      asn: asn                                # CHECK: claim name and format
+      mntner: mnt                             # CHECK
+
+  # OAuth.dn42 by iedon (AS4242422189), clearnet auth.iedon.net. Self-service
+  # app registration.
+  - name: iedon
+    displayName: OAuth.dn42 (iedon)
+    issuer: https://auth.iedon.net            # CHECK: exact issuer (discovery path)
+    clientID: CHECK
+    clientSecretFile: /secrets/iedon-client-secret
+    scopes: [openid, profile]                 # CHECK
+    useUserinfo: true                         # CHECK: ASN may only be in userinfo
+    claims:
+      asn: asn                                # CHECK
+      mntner: mntner                          # CHECK
+
+  # HExpNetwork WebAuth (AS4242420298). Registration and claims unknown.
+  - name: hexp
+    displayName: HExpNetwork WebAuth
+    issuer: https://CHECK.hexp.example        # CHECK: everything
+    clientID: CHECK
+    scopes: [openid]
+    claims:
+      asn: asn                                # CHECK
+      mntner: mnt                             # CHECK
+
+  # Auth42 by burble. Possibly plain OAuth 2.0 without OIDC; then the
+  # identity comes from the userinfo endpoint.
+  - name: auth42
+    displayName: Auth42 (burble)
+    authURL: https://CHECK.burble.example/authorize   # CHECK
+    tokenURL: https://CHECK.burble.example/token      # CHECK
+    userinfoURL: https://CHECK.burble.example/userinfo # CHECK
+    clientID: CHECK
+    scopes: []                                # CHECK
+    claims:
+      subject: sub                            # CHECK
+      mntner: mntner                          # CHECK

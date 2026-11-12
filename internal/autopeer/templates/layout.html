@@ -1,0 +1,17 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AS{{.RouterASN}} autopeer</title>
+<style>
+:root{color-scheme:light dark;--fg:#1d1d1f;--bg:#fafafa;--muted:#6b6b70;--line:#d9d9de;--accent:#2457c5;--bad:#b3261e}
+@media (prefers-color-scheme:dark){:root{--fg:#ececf0;--bg:#16161a;--muted:#9a9aa3;--line:#33333a;--accent:#8ab0ff;--bad:#ff8a80}}
+body{font:16px/1.5 system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:46rem;margin:0 auto;padding:1.5rem 1rem}
+h1{font-size:1.4rem}h2{font-size:1.1rem;margin-top:2rem}a{color:var(--accent)}
+label{display:block;margin-top:1rem;font-weight:600}input,select{width:100%;box-sizing:border-box;padding:.5rem;font:inherit;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit}
+small{color:var(--muted);display:block}button{margin-top:1.25rem;padding:.55rem 1.2rem;font:inherit;border:0;border-radius:6px;background:var(--accent);color:var(--bg);cursor:pointer}
+pre{background:rgba(127,127,127,.12);padding:.75rem;border-radius:6px;overflow-x:auto;font-size:.875rem}
+.err{color:var(--bad);font-weight:600}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--line)}
+header{display:flex;justify-content:space-between;align-items:center;gap:1rem}header form button{margin:0;background:transparent;color:var(--accent);padding:0}
+</style></head><body>
+<header><h1>AS{{.RouterASN}} autopeer</h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.Subject}}</button></form>{{end}}</header>
+{{end}}
+{{define "foot"}}</body></html>{{end}}

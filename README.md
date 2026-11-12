@@ -231,9 +231,70 @@ check:
 
 They need `--privileged` and must not run on a host.
 
+## autopeer
+
+`cmd/autopeer` is the web front end, shipped in the same image (command
+`/autopeer --config ...`). Example config: `deploy/autopeer-config.example.yaml`.
+Example Deployment, with a git-sync sidecar for the registry and read-only
+RBAC on `dn42peers`: `deploy/autopeer.yaml`.
+
+The flow:
+
+1. **Login** with one of the configured providers. Each one is a generic
+   OAuth 2.0 / OpenID Connect client: Authorization Code with PKCE (S256)
+   always, and nonce plus ID-token verification when `issuer` is set (OIDC
+   discovery). Without `issuer`, it uses `authURL`/`tokenURL`/`userinfoURL`
+   (plain OAuth, identity from userinfo).
+2. **Ownership**: `claims.asn` names the claim with the ASNs the login may
+   manage. Dotted paths, numbers, `AS…` strings and lists all work.
+   `claims.mntner` names a claim with mntners; their ASNs come from
+   `mnt-by:` in a DN42 registry clone (`data/aut-num`), reloaded on an
+   interval. No accounts: the login lives in an AES-GCM encrypted cookie for
+   `sessionTTL`.
+3. **Form**: ASN (from the login), name, WireGuard public key, optional
+   endpoint, link-local address. These are checked with the same code as the
+   operator, against the peers already in the repo: name, port, ASN +
+   neighbor, and not our own link-local address. `listenPort` is always
+   written explicitly: 2 + the last 4 digits if that's free, otherwise the
+   highest free port. Peers use the shared autopeer key (no `keyRef`).
+4. **PR**: `peers/<asn>-<name>.yaml` on a new branch in the peers repo,
+   through a GitHub App (JWT → installation token → branch, file, PR). The
+   page shows the WireGuard and BIRD config for the peer's side.
+5. **Status**: the home page lists the login's peers from the repo, with
+   live state (BGP state, handshake, routes, Valid) from the cluster when
+   `kubernetes.enabled`.
+
+`--fake-repo` keeps PRs in memory for local runs. The tests run the full
+flow against a fake OIDC/OAuth provider that enforces PKCE and nonce, and the
+GitHub App client against a fake GitHub API.
+
+### To check before go-live
+
+The provider details are unverified; everything marked `CHECK` in the
+example config:
+
+- **Kioubit** (AS4242423914): the OIDC issuer URL and its client
+  registration (message Kioubit on IRC to activate the domain). Which scope
+  releases the ASN, and the claim name and format for ASN and/or mntner.
+- **OAuth.dn42 / iedon** (auth.iedon.net): the exact issuer (discovery
+  path), self-service registration, and whether the ASN or mntner is in the
+  ID token or only in userinfo (`useUserinfo`). Also the claim names.
+- **HExpNetwork WebAuth** (AS4242420298): everything (OIDC or not,
+  endpoints, claims, registration).
+- **Auth42 / burble**: OIDC or plain OAuth, endpoints, claim names (subject,
+  mntner/ASN), and registration.
+- For all four: does the claim mean "may manage" (`mnt-by`) or only
+  "authenticated as"? Do they support PKCE for confidential clients? Which
+  redirect URIs are allowed (`dn42.oscarr.nl` and `autopeer.oscrx.dn42`)?
+
 ## Not done yet
 
-- `cmd/autopeer`, the web front end.
+- autopeer: the provider checks above; one deployment serving both hosts
+  (`publicURL` is single-valued today); rate limiting and duplicate-PR
+  detection (an open PR for the same name isn't seen until it's merged);
+  peer deletion through the app (the plan: a PR removing the file).
+- The CI gate in the peers repo (`internal/peer` and `autopeer.ParsePeerFile`
+  are ready to reuse).
 
 ## License
 

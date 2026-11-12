@@ -1,0 +1,4 @@
+{{define "login.html"}}{{template "head" .}}
+<p>Peer with AS{{.RouterASN}} over WireGuard. Log in with a DN42 identity provider; it proves which ASNs you maintain.</p>
+<ul>{{range .Providers}}<li><a href="/login/{{.Name}}">{{.DisplayName}}</a></li>{{end}}</ul>
+{{template "foot" .}}{{end}}

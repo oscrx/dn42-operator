@@ -1,0 +1,52 @@
+# Example only. The autopeer web app: same image as the operator, command
+# /autopeer. Read-only on DN42Peer (status page); PRs go through the GitHub
+# App, never the cluster. A git-sync sidecar keeps the registry clone fresh.
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: dn42-autopeer, namespace: dn42}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: dn42-autopeer, namespace: dn42}
+rules:
+  - apiGroups: [dn42.oscarr.nl]
+    resources: [dn42peers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: dn42-autopeer, namespace: dn42}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: dn42-autopeer}
+subjects: [{kind: ServiceAccount, name: dn42-autopeer, namespace: dn42}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: dn42-autopeer, namespace: dn42}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app.kubernetes.io/name: dn42-autopeer}}
+  template:
+    metadata: {labels: {app.kubernetes.io/name: dn42-autopeer}}
+    spec:
+      serviceAccountName: dn42-autopeer
+      securityContext: {runAsNonRoot: true, runAsUser: 65532, fsGroup: 65532}
+      containers:
+        - name: autopeer
+          image: ghcr.io/oscrx/dn42-operator:v0.1.0
+          command: [/autopeer, --config=/etc/autopeer/config.yaml]
+          ports: [{name: http, containerPort: 8080}]
+          readinessProbe: {httpGet: {path: /healthz, port: http}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts:
+            - {name: config, mountPath: /etc/autopeer, readOnly: true}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+            - {name: registry, mountPath: /registry-root, readOnly: true}
+        - name: git-sync
+          image: registry.k8s.io/git-sync/git-sync:v4.4.0
+          args: [--repo=https://git.dn42.dev/dn42/registry.git, --root=/registry-root, --link=registry, --period=1h, --depth=1]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          volumeMounts: [{name: registry, mountPath: /registry-root}]
+      volumes:
+        - {name: config, configMap: {name: dn42-autopeer-config}}  # see autopeer-config.example.yaml (registry.path: /registry-root/registry)
+        - {name: secrets, secret: {secretName: dn42-autopeer}}       # cookie-key, github-app.pem, client secrets
+        - {name: registry, emptyDir: {}}
