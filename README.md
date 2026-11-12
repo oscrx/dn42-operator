@@ -204,3 +204,7 @@ They need `--privileged` and must not run on a host.
 - With a standby node, a DaemonSet rolling update stalls on the follower,
   which is never ready. That needs a different readiness or Service-selection
   scheme before the standby exists.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
