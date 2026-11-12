@@ -1,0 +1,7 @@
+author: "dn42-autopeer[bot]"
+ok: false
+autoMergeable: false
+changes:
+  - "M peers/4242422189-iedon.yaml"
+errorContains:
+  - 'hand-managed peer'

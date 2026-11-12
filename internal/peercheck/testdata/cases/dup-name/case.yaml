@@ -1,0 +1,7 @@
+author: "dn42-autopeer[bot]"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/4242420010-moe.yaml"
+errorContains:
+  - 'name "moe" is already used'

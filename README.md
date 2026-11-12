@@ -287,14 +287,42 @@ example config:
   "authenticated as"? Do they support PKCE for confidential clients? Which
   redirect URIs are allowed (`dn42.oscarr.nl` and `autopeer.oscrx.dn42`)?
 
+## peercheck (CI gate for the peers repo)
+
+`cmd/peercheck` is the gate the peers repo (`oscrx/dn42-peers`) runs on
+every PR and push. It reuses `internal/peer`, so the operator, autopeer and
+CI share one definition of a valid peer. Its checks:
+
+- **Every file**: one YAML document, a strict schema (no unknown fields, no
+  `status`, no metadata besides `name`/`namespace`), the right
+  kind/apiVersion, a namespace of `dn42` or none, the
+  `peers/<asn>-<name>.yaml` name matching the object, and the spec
+  validation.
+- **Registry**: the ASN has an aut-num object, from a registry clone
+  (`--registry-dir`) or a cached list (`--asn-list`).
+- **Across files**: no duplicate name, port or ASN + neighbor; a conflict is
+  reported on the file the PR touches.
+- **PR rules**:
+  - The App (`--app-login`) may only touch `peers/`, may not set `keyRef`,
+    and may not change or delete hand-managed (`keyRef`) peers. Breaking any
+    of these fails the check.
+  - Human PRs pass but are not auto-mergeable.
+  - Auto-merge needs an App PR that changes exactly one peer file.
+
+Trees are read from git objects, not the worktree (`--worktree` is for
+local runs). Under Actions it writes `auto-mergeable=` to `$GITHUB_OUTPUT`
+and emits error annotations. The fixtures are in
+`internal/peercheck/testdata/cases/<case>/`: the head tree, the base
+versions and `case.yaml` with the diff, author and expected outcome.
+
 ## Not done yet
 
 - autopeer: the provider checks above; one deployment serving both hosts
   (`publicURL` is single-valued today); rate limiting and duplicate-PR
   detection (an open PR for the same name isn't seen until it's merged);
   peer deletion through the app (the plan: a PR removing the file).
-- The CI gate in the peers repo (`internal/peer` and `autopeer.ParsePeerFile`
-  are ready to reuse).
+- Tag a release so the peers repo workflow's pinned
+  `go install .../cmd/peercheck@v0.1.0` resolves (after the repo is public).
 
 ## License
 

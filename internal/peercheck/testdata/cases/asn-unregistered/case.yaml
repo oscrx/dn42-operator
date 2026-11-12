@@ -1,0 +1,7 @@
+author: "dn42-autopeer[bot]"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/4242420099-kio.yaml"
+errorContains:
+  - 'AS4242420099 has no aut-num object'

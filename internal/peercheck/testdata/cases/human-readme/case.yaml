@@ -1,0 +1,6 @@
+author: "oscrx"
+ok: true
+autoMergeable: false
+changes:
+  - "M README.md"
+errorContains:

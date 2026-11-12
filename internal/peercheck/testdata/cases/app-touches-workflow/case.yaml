@@ -1,0 +1,8 @@
+author: "dn42-autopeer[bot]"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/4242420010-kio.yaml"
+  - "M .github/workflows/check.yml"
+errorContains:
+  - 'may only change files in peers/'

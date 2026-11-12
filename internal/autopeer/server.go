@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
+	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 //go:embed templates/*.html
@@ -43,14 +44,14 @@ type Session struct {
 type Server struct {
 	Cfg       *Config
 	Providers map[string]*Provider
-	Registry  *Registry
+	Registry  *registry.Registry
 	Repo      PeerRepo
 	Status    StatusSource // optional
 	Cookies   *Cookies
 }
 
 // NewServer wires providers from the config.
-func NewServer(cfg *Config, reg *Registry, repo PeerRepo, status StatusSource, cookies *Cookies) *Server {
+func NewServer(cfg *Config, reg *registry.Registry, repo PeerRepo, status StatusSource, cookies *Cookies) *Server {
 	s := &Server{Cfg: cfg, Providers: map[string]*Provider{}, Registry: reg, Repo: repo, Status: status, Cookies: cookies}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]

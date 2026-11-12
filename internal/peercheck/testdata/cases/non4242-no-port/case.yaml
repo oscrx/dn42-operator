@@ -1,0 +1,7 @@
+author: "dn42-autopeer[bot]"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/4201270001-neo.yaml"
+errorContains:
+  - 'set spec.listenPort'

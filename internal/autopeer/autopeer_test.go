@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
+	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 const (
@@ -35,7 +36,7 @@ func testConfig(t *testing.T, providers ...ProviderConfig) *Config {
 	return c
 }
 
-func testRegistry(t *testing.T) *Registry {
+func testRegistry(t *testing.T) *registry.Registry {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "data", "aut-num")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -50,7 +51,7 @@ func testRegistry(t *testing.T) *Registry {
 	for n, c := range files {
 		os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
 	}
-	r := &Registry{Path: filepath.Dir(filepath.Dir(dir))}
+	r := &registry.Registry{Path: filepath.Dir(filepath.Dir(dir))}
 	if err := r.Load(); err != nil {
 		t.Fatal(err)
 	}

@@ -21,6 +21,7 @@ import (
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/autopeer"
+	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 func main() {
@@ -49,7 +50,7 @@ func run(configPath string, fakeRepo bool) error {
 	if err != nil {
 		return err
 	}
-	reg := &autopeer.Registry{Path: cfg.Registry.Path}
+	reg := &registry.Registry{Path: cfg.Registry.Path}
 	regErr := reg.Load() // the git-sync sidecar may not have cloned yet
 
 	var repo autopeer.PeerRepo

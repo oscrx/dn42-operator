@@ -1,0 +1,9 @@
+apiVersion: dn42.oscarr.nl/v1alpha1
+kind: DN42Peer
+metadata:
+  name: moe
+spec:
+  asn: 4242420253
+  listenPort: 20253
+  publicKey: xAEAuM4uK5+j5kwRGIW6KYEsJVy0/6Awc4x8mpmKuSw=
+  neighbor: fe80::254

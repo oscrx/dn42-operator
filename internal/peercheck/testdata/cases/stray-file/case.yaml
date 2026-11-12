@@ -1,0 +1,7 @@
+author: "oscrx"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/notes.txt"
+errorContains:
+  - 'file name must be'

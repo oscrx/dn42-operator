@@ -1,0 +1,14 @@
+apiVersion: dn42.oscarr.nl/v1alpha1
+kind: DN42Peer
+metadata:
+  name: kio
+spec:
+  asn: 4242420010
+  listenPort: 20010
+  endpoint: "[2001:db8::10]:23818"
+  publicKey: FOUmTA011X0niEP9LOkspmpV8heA+M+E3qZBW64C7Qw=
+  neighbor: fe80::10
+---
+apiVersion: v1
+kind: Secret
+metadata: {name: x}

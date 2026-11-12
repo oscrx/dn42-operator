@@ -1,4 +1,5 @@
-package autopeer
+// Package registry reads a clone of the DN42 registry (or a plain ASN list).
+package registry
 
 import (
 	"bufio"

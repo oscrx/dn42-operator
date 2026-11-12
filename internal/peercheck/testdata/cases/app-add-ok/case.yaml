@@ -1,0 +1,6 @@
+author: "dn42-autopeer[bot]"
+ok: true
+autoMergeable: true
+changes:
+  - "A peers/4242420010-kio.yaml"
+errorContains:

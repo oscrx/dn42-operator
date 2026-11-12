@@ -1,0 +1,6 @@
+# fake registry: aut-num objects that exist
+AS4242422189
+AS4242420253
+AS4242420010
+AS4242420011
+4201270001

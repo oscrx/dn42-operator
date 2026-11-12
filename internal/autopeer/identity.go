@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/oscrx/dn42-operator/internal/peer"
+	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 var providerNameRe = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
@@ -89,7 +90,7 @@ func parseASN(s string) (int64, error) {
 // IdentityFromClaims builds the identity from a provider's claims: ASNs from
 // the ASN claim, plus the ASNs the registry lists for each mntner claim.
 // Unparseable values are ignored; an identity without any ASN is an error.
-func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *Registry) (*Identity, error) {
+func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.Registry) (*Identity, error) {
 	id := &Identity{Provider: p.Name}
 	if v, ok := lookup(claims, p.Claims.Subject); ok {
 		if s := claimStrings(v); len(s) > 0 {
