@@ -33,6 +33,7 @@ import (
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/bird"
 	ourctrl "github.com/oscrx/dn42-operator/internal/controller"
+	"github.com/oscrx/dn42-operator/internal/latency"
 	"github.com/oscrx/dn42-operator/internal/netdev"
 )
 
@@ -194,6 +195,9 @@ func run(c runConfig) error {
 		Trigger:           r.Trigger,
 		CleanupOnShutdown: c.cleanupShutdown,
 	}); err != nil {
+		return err
+	}
+	if err := mgr.Add(&ourctrl.LatencyProber{R: r, Pinger: latency.ICMP{}}); err != nil {
 		return err
 	}
 	if err := mgr.Add(&ourctrl.StatusLoop{R: r, Interval: c.statusInterval}); err != nil {

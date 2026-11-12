@@ -291,6 +291,7 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 			continue
 		}
 		p := vr.Peer
+		p.ApplyMeasuredLatency(o.Status.MeasuredLatency)
 		pr.valid, pr.validReason = true, peer.ReasonValid
 		pr.listenPort = int32(p.ListenPort)
 		link := p.Link

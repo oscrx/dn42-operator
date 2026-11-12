@@ -23,7 +23,7 @@ spec:
   publicKey: 08dzv758I5APqJizgw/W6O+FceyHSCbx/L/GZ3TL5TQ=
   localLinkLocal: fe80::3818   # optional, default fe80::3818
   neighbor: fe80::2189:177
-  link: {latency: 2, bandwidth: 24, crypto: 34}   # optional, default 5/24/34
+  link: {latency: 2, bandwidth: 24, crypto: 34}   # optional; else latency measured, bw 24, crypto 34
   keyRef: iedon                # optional: key in the key Secret; else the shared autopeer key
 ```
 
@@ -95,7 +95,16 @@ pass every 60s. Status and metrics are written every 30s.
    the bad one. That one is rolled back and marked `BIRDRejected`; the rest go
    through. The operator speaks the control socket protocol itself, so no
    `birdc` binary is needed.
-4. **Service**: `spec.ports` of the endpoint Service (one UDP port `wg-<name>`
+4. **Latency** (only when `spec.link` is unset): once a day the leader sends
+   10 pings to the endpoint over the underlay. It maps the median RTT to the
+   DN42 latency community: 1 ≤2.7ms, 2 ≤7.3ms, 3 ≤20ms, 4 ≤55ms, 5 ≤148ms,
+   6 ≤403ms, 7 ≤1097ms, 8 ≤2981ms, else 9. The result goes to
+   `status.measuredLatency`, `measuredRTT` and `latencyMeasuredAt`, and the
+   next pass renders it. Until the first measurement, and when the endpoint
+   doesn't answer (at least 5 of 10 replies are needed; retried hourly), the
+   default 5 is used. `kubectl get dn42peers -o wide` shows the effective
+   latency.
+5. **Service**: `spec.ports` of the endpoint Service (one UDP port `wg-<name>`
    per tunnel), via server-side apply with field manager `dn42-operator`.
 
 ### Safety rules
@@ -196,7 +205,7 @@ network, so pick free ports.
 `dn42_operator_bird_up`, and per peer (`peer`, `asn` labels):
 `dn42_peer_valid`, `dn42_peer_tunnel_ready`,
 `dn42_peer_handshake_age_seconds`, `dn42_peer_bgp_established`,
-`dn42_peer_routes_imported`.
+`dn42_peer_routes_imported`, `dn42_peer_endpoint_rtt_seconds`.
 
 ## Development
 
@@ -224,8 +233,6 @@ They need `--privileged` and must not run on a host.
 
 ## Not done yet
 
-- Latency measurement when `spec.link` is unset (`status.measuredLatency`);
-  defaults are used.
 - `cmd/autopeer`, the web front end.
 
 ## License

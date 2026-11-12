@@ -5,6 +5,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/bird"
+	"github.com/oscrx/dn42-operator/internal/latency"
 	"github.com/oscrx/dn42-operator/internal/netdev"
 )
 
@@ -137,6 +139,8 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "-n", "remote", "addr", "add", "192.0.2.2/24", "dev", "veth-remote")
 	sh(t, "ip", "-n", "remote", "link", "set", "veth-remote", "up")
 	sh(t, "ip", "-n", "remote", "link", "set", "lo", "up")
+	sh(t, "ip", "addr", "add", "2001:db8:42::1/64", "dev", "veth-op", "nodad")
+	sh(t, "ip", "-n", "remote", "addr", "add", "2001:db8:42::2/64", "dev", "veth-remote", "nodad")
 
 	ourKey, remoteKey := genKey(t), genKey(t)
 	os.WriteFile(filepath.Join(work, "remote.key"), []byte(remoteKey.String()), 0o600)
@@ -204,6 +208,17 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	// The route from the peer is in BIRD; the session is in the VRF (BGP
 	// would not come up on the link-local otherwise).
 	t.Logf("aa: state %s, %d routes", p.Status.BGPState, *p.Status.RoutesImported)
+
+	// Latency: real ICMP to the peer's endpoint, v4 and v6, over the
+	// underlay (not the VRF).
+	for _, a := range []string{"192.0.2.2", "2001:db8:42::2"} {
+		rtt, lat, err := latency.Measure(ctx, latency.ICMP{Timeout: time.Second}, netip.MustParseAddr(a), 10, 20*time.Millisecond)
+		if err != nil || lat != 1 || rtt <= 0 {
+			t.Errorf("ping %s: rtt %v community %d err %v", a, rtt, lat, err)
+		} else {
+			t.Logf("ping %s: median %v, community %d", a, rtt, lat)
+		}
+	}
 
 	// Unchanged pass: BIRD isn't reconfigured, the session stays up.
 	h.mustPass()

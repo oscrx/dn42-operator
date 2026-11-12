@@ -37,6 +37,10 @@ spec:
     - jsonPath: .status.routesImported
       name: Routes
       type: integer
+    - jsonPath: .status.link.latency
+      name: Latency
+      priority: 1
+      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -95,7 +99,8 @@ spec:
               link:
                 description: |-
                   Link values for the BGP communities. Optional; without them the
-                  operator's defaults are used (measuring is not implemented yet).
+                  latency is measured (status.measuredLatency) and bandwidth and crypto
+                  use the operator's defaults.
                 properties:
                   bandwidth:
                     description: Bandwidth community, 21 (>=0.1 Mbit/s) .. 25 (>=1000
@@ -227,6 +232,10 @@ spec:
                 description: LastHandshake is the last WireGuard handshake.
                 format: date-time
                 type: string
+              latencyMeasuredAt:
+                description: LatencyMeasuredAt is when MeasuredLatency was measured.
+                format: date-time
+                type: string
               link:
                 description: Link is the effective link values rendered into BIRD.
                 properties:
@@ -261,10 +270,14 @@ spec:
                 type: integer
               measuredLatency:
                 description: |-
-                  MeasuredLatency is the latency community measured from the endpoint
-                  RTT, when spec.link is not set. Not implemented yet.
+                  MeasuredLatency is the DN42 latency community (1..9) from the median
+                  RTT of 10 pings to the endpoint, measured daily when spec.link is not
+                  set. It replaces the default latency in the BIRD import/export calls.
                 format: int32
                 type: integer
+              measuredRTT:
+                description: MeasuredRTT is the median RTT behind MeasuredLatency.
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the generation the status was computed
                   from.

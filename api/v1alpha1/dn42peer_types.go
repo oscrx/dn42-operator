@@ -77,7 +77,8 @@ type DN42PeerSpec struct {
 	Neighbor string `json:"neighbor"`
 
 	// Link values for the BGP communities. Optional; without them the
-	// operator's defaults are used (measuring is not implemented yet).
+	// latency is measured (status.measuredLatency) and bandwidth and crypto
+	// use the operator's defaults.
 	// +optional
 	Link *LinkValues `json:"link,omitempty"`
 
@@ -124,10 +125,19 @@ type DN42PeerStatus struct {
 	// +optional
 	RoutesImported *int64 `json:"routesImported,omitempty"`
 
-	// MeasuredLatency is the latency community measured from the endpoint
-	// RTT, when spec.link is not set. Not implemented yet.
+	// MeasuredLatency is the DN42 latency community (1..9) from the median
+	// RTT of 10 pings to the endpoint, measured daily when spec.link is not
+	// set. It replaces the default latency in the BIRD import/export calls.
 	// +optional
 	MeasuredLatency *int32 `json:"measuredLatency,omitempty"`
+
+	// MeasuredRTT is the median RTT behind MeasuredLatency.
+	// +optional
+	MeasuredRTT *metav1.Duration `json:"measuredRTT,omitempty"`
+
+	// LatencyMeasuredAt is when MeasuredLatency was measured.
+	// +optional
+	LatencyMeasuredAt *metav1.Time `json:"latencyMeasuredAt,omitempty"`
 }
 
 // DN42Peer is a DN42 peering: a WireGuard tunnel and a BGP session in BIRD.
@@ -141,6 +151,7 @@ type DN42PeerStatus struct {
 // +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.bgpState`
 // +kubebuilder:printcolumn:name="Handshake",type=date,JSONPath=`.status.lastHandshake`
 // +kubebuilder:printcolumn:name="Routes",type=integer,JSONPath=`.status.routesImported`
+// +kubebuilder:printcolumn:name="Latency",type=integer,JSONPath=`.status.link.latency`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z][a-z0-9]{0,11}$')",message="name must match ^[a-z][a-z0-9]{0,11}$ (wg-<name> must fit in 15 characters)"
 type DN42Peer struct {

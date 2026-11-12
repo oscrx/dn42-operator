@@ -3,10 +3,12 @@ package controller
 import (
 	"context"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -413,5 +415,99 @@ func TestLeaderLabel(t *testing.T) {
 	}
 	if u.r.Ready() == nil {
 		t.Error("ready without a confirmed label")
+	}
+}
+
+type fixedPinger struct {
+	rtt   time.Duration
+	fail  bool
+	calls int
+}
+
+func (f *fixedPinger) Ping(_ context.Context, _ netip.Addr, count int, _ time.Duration) ([]time.Duration, error) {
+	f.calls++
+	if f.fail {
+		return nil, errors.New("no replies")
+	}
+	out := make([]time.Duration, count)
+	for i := range out {
+		out[i] = f.rtt
+	}
+	return out, nil
+}
+
+func TestLatencyProber(t *testing.T) {
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	measured := mkPeer("measured", 4242420001, 0, "fe80::1", 0)
+	fixed := mkPeer("fixed", 4242420002, 0, "fe80::2", 0)
+	fixed.Spec.Link = &dn42v1.LinkValues{Latency: 2, Bandwidth: 25, Crypto: 34}
+	noEndpoint := mkPeer("noep", 4242420003, 0, "fe80::3", 0)
+	noEndpoint.Spec.Endpoint = ""
+	u := newUnit(t, measured, fixed, noEndpoint, keySecret(t, "autopeer"), endpointService())
+	u.r.Now = func() time.Time { return now }
+	pinger := &fixedPinger{rtt: 30 * time.Millisecond}
+	lp := &LatencyProber{R: u.r, Pinger: pinger, Interval: time.Nanosecond}
+
+	// Before measuring, the default latency (5) is rendered.
+	u.mustPass()
+	if b, _ := os.ReadFile(filepath.Join(u.path, "measured.conf")); !strings.Contains(string(b), "dn42_import(5, 24, 34)") {
+		t.Errorf("default not rendered:\n%s", b)
+	}
+
+	n, err := lp.Run(context.Background())
+	if err != nil || n != 1 || pinger.calls != 1 {
+		t.Fatalf("run: n=%d calls=%d err=%v", n, pinger.calls, err)
+	}
+	s := u.peer("measured").Status
+	if s.MeasuredLatency == nil || *s.MeasuredLatency != 4 || s.MeasuredRTT.Duration != 30*time.Millisecond ||
+		s.LatencyMeasuredAt == nil || !s.LatencyMeasuredAt.Time.Equal(now) {
+		t.Fatalf("status: %+v", s)
+	}
+	if u.peer("fixed").Status.MeasuredLatency != nil {
+		t.Error("peer with spec.link measured")
+	}
+
+	// The next pass renders the measured value, and status shows it.
+	u.mustPass()
+	if b, _ := os.ReadFile(filepath.Join(u.path, "measured.conf")); !strings.Contains(string(b), "dn42_import(4, 24, 34)") {
+		t.Errorf("measured latency not rendered:\n%s", b)
+	}
+	if err := u.r.UpdateStatus(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st := u.peer("measured").Status; st.Link.Latency != 4 || *st.MeasuredLatency != 4 {
+		t.Errorf("status after pass: %+v", st)
+	}
+	if b, _ := os.ReadFile(filepath.Join(u.path, "fixed.conf")); !strings.Contains(string(b), "dn42_import(2, 25, 34)") {
+		t.Error("spec.link not used")
+	}
+
+	// Not again within a day; again after.
+	now = now.Add(23 * time.Hour)
+	if n, _ := lp.Run(context.Background()); n != 0 {
+		t.Error("re-measured within a day")
+	}
+	now = now.Add(2 * time.Hour)
+	pinger.rtt = 5 * time.Millisecond
+	if n, _ := lp.Run(context.Background()); n != 1 || *u.peer("measured").Status.MeasuredLatency != 2 {
+		t.Error("not re-measured after a day")
+	}
+
+	// A failed measurement keeps the old value and retries after an hour.
+	now = now.Add(25 * time.Hour)
+	pinger.fail = true
+	if n, _ := lp.Run(context.Background()); n != 0 || *u.peer("measured").Status.MeasuredLatency != 2 {
+		t.Error("failed measurement changed status")
+	}
+	calls := pinger.calls
+	now = now.Add(30 * time.Minute)
+	lp.Run(context.Background())
+	if pinger.calls != calls {
+		t.Error("retried within the hour")
+	}
+	now = now.Add(31 * time.Minute)
+	pinger.fail = false
+	if n, _ := lp.Run(context.Background()); n != 1 {
+		t.Error("no retry after an hour")
 	}
 }

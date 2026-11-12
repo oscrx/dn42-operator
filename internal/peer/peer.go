@@ -66,7 +66,10 @@ type Peer struct {
 	LocalLinkLocal netip.Addr
 	Neighbor       netip.Addr
 	Link           dn42v1.LinkValues
-	KeyRef         string // "" = the shared autopeer key
+	// LinkSet is true when spec.link was given; otherwise Link holds the
+	// defaults and the latency may be replaced by a measurement.
+	LinkSet bool
+	KeyRef  string // "" = the shared autopeer key
 }
 
 // Interface is the WireGuard link name.
@@ -195,6 +198,7 @@ func FromSpec(name string, s *dn42v1.DN42PeerSpec) (*Peer, *Error) {
 			return nil, invalid("link.crypto %d is outside 31-34", l.Crypto)
 		}
 		p.Link = l
+		p.LinkSet = true
 	}
 
 	if s.KeyRef != "" {
@@ -204,6 +208,15 @@ func FromSpec(name string, s *dn42v1.DN42PeerSpec) (*Peer, *Error) {
 		p.KeyRef = s.KeyRef
 	}
 	return p, nil
+}
+
+// ApplyMeasuredLatency uses a measured latency community when the spec has
+// no link values. Out-of-range values are ignored.
+func (p *Peer) ApplyMeasuredLatency(lat *int32) {
+	if p.LinkSet || lat == nil || *lat < 1 || *lat > 9 {
+		return
+	}
+	p.Link.Latency = *lat
 }
 
 // ParseKey parses a base64 WireGuard key.
