@@ -20,7 +20,6 @@ type Provider struct {
 	// HTTPClient for discovery, token and userinfo calls (default: 10s timeout).
 	HTTPClient *http.Client
 
-
 	mu       sync.Mutex
 	ready    bool
 	oauth    oauth2.Config

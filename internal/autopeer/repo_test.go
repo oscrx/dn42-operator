@@ -23,15 +23,15 @@ import (
 // fakeGitHub implements the few REST endpoints GitHubApp uses and checks
 // the App JWT and installation token.
 type fakeGitHub struct {
-	t     *testing.T
-	pub   *rsa.PublicKey
-	mu    sync.Mutex
-	files map[string]string // path on main -> content
-	refs  map[string]string
+	t       *testing.T
+	pub     *rsa.PublicKey
+	mu      sync.Mutex
+	files   map[string]string // path on main -> content
+	refs    map[string]string
 	added   map[string]string // branch/path -> content
 	deleted map[string]bool   // branch/path
-	pulls []map[string]string
-	calls []string
+	pulls   []map[string]string
+	calls   []string
 }
 
 func (g *fakeGitHub) handler() http.Handler {
