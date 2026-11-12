@@ -2,9 +2,14 @@
 # provider URLs and especially which claims carry the ASN or mntner must be
 # confirmed with each provider (and a client registered) before use.
 listen: ":8080"
-publicURL: https://dn42.oscarr.nl        # second host: https://autopeer.oscrx.dn42
+publicURL: https://dn42.oscarr.nl
+extraPublicURLs:                         # same app on more hosts; logins use the host they started on
+  - https://autopeer.oscrx.dn42          # register both callbacks with every provider
 cookieKeyFile: /secrets/cookie-key       # 32 random bytes or their base64
 sessionTTL: 1h
+limits:
+  perLoginPerHour: 3                     # PRs (requests and removals) per login
+  totalPerHour: 20
 
 router:
   asn: 4242423818

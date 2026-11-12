@@ -20,7 +20,6 @@ type Provider struct {
 	// HTTPClient for discovery, token and userinfo calls (default: 10s timeout).
 	HTTPClient *http.Client
 
-	redirectURL string
 
 	mu       sync.Mutex
 	ready    bool
@@ -29,9 +28,10 @@ type Provider struct {
 	verifier *oidc.IDTokenVerifier
 }
 
-// NewProvider prepares a provider; redirectURL is its callback URL.
-func NewProvider(cfg *ProviderConfig, redirectURL string) *Provider {
-	return &Provider{Config: cfg, redirectURL: redirectURL, HTTPClient: &http.Client{Timeout: 10 * time.Second}}
+// NewProvider prepares a provider. The redirect URI is per flow, so one
+// provider serves every public host.
+func NewProvider(cfg *ProviderConfig) *Provider {
+	return &Provider{Config: cfg, HTTPClient: &http.Client{Timeout: 10 * time.Second}}
 }
 
 func (p *Provider) ctx(ctx context.Context) context.Context {
@@ -48,7 +48,6 @@ func (p *Provider) init(ctx context.Context) error {
 	p.oauth = oauth2.Config{
 		ClientID:     c.ClientID,
 		ClientSecret: c.clientSecret,
-		RedirectURL:  p.redirectURL,
 		Scopes:       c.Scopes,
 	}
 	if c.Issuer != "" {
@@ -78,11 +77,15 @@ type Flow struct {
 	State    string `json:"s"`
 	Verifier string `json:"v"` // PKCE code verifier
 	Nonce    string `json:"n"`
+	// RedirectURL is the callback on the host the login started from; it
+	// must be registered with the provider.
+	RedirectURL string `json:"r"`
 }
 
 // NewFlow creates fresh state, PKCE verifier and nonce.
-func NewFlow(provider string) *Flow {
-	return &Flow{Provider: provider, State: randomString(24), Verifier: oauth2.GenerateVerifier(), Nonce: randomString(24)}
+func NewFlow(provider, redirectURL string) *Flow {
+	return &Flow{Provider: provider, State: randomString(24), Verifier: oauth2.GenerateVerifier(),
+		Nonce: randomString(24), RedirectURL: redirectURL}
 }
 
 // AuthCodeURL is where the user is sent to log in (Authorization Code with
@@ -91,7 +94,7 @@ func (p *Provider) AuthCodeURL(ctx context.Context, f *Flow) (string, error) {
 	if err := p.init(ctx); err != nil {
 		return "", err
 	}
-	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(f.Verifier)}
+	opts := []oauth2.AuthCodeOption{oauth2.S256ChallengeOption(f.Verifier), oauth2.SetAuthURLParam("redirect_uri", f.RedirectURL)}
 	if p.oidc != nil {
 		opts = append(opts, oidc.Nonce(f.Nonce))
 	}
@@ -106,7 +109,7 @@ func (p *Provider) Claims(ctx context.Context, f *Flow, code string) (map[string
 		return nil, err
 	}
 	cctx := p.ctx(ctx)
-	tok, err := p.oauth.Exchange(cctx, code, oauth2.VerifierOption(f.Verifier))
+	tok, err := p.oauth.Exchange(cctx, code, oauth2.VerifierOption(f.Verifier), oauth2.SetAuthURLParam("redirect_uri", f.RedirectURL))
 	if err != nil {
 		return nil, fmt.Errorf("token exchange: %w", err)
 	}

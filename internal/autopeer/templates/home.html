@@ -2,10 +2,11 @@
 <p>Logged in through {{.Session.Identity.Provider}}. You may manage: {{range $i, $a := .Session.Identity.ASNs}}{{if $i}}, {{end}}AS{{$a}}{{end}}.</p>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
 <h2>Your peerings</h2>
-{{if .Peers}}<table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th></tr>
-{{range .Peers}}<tr><td>{{.Name}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
-<td>{{if .Live}}{{or .BGPState "—"}}{{if eq .Valid "False"}} <span class="err">({{.ValidReason}})</span>{{end}}{{else}}pending{{end}}</td>
-<td>{{or .Handshake "—"}}</td><td>{{or .Routes "—"}}</td></tr>{{end}}</table>
+{{if .Peers}}<table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th><th></th></tr>
+{{$csrf := .Session.CSRF}}{{range .Peers}}<tr><td>{{.Name}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
+<td>{{if .Live}}{{or .BGPState "—"}}{{if eq .Valid "False"}} <span class="err">({{.ValidReason}})</span>{{end}}{{else}}not configured yet{{end}}</td>
+<td>{{or .Handshake "—"}}</td><td>{{or .Routes "—"}}</td>
+<td>{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<form method="post" action="/peer/remove"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button>Remove</button></form>{{end}}</td></tr>{{end}}</table>
 {{else}}<p>None yet.</p>{{end}}
 <p><a href="/peer/new">Request a new peering</a></p>
 {{template "foot" .}}{{end}}

@@ -130,12 +130,19 @@ type app struct {
 }
 
 func newApp(t *testing.T, providers ...ProviderConfig) *app {
+	return newAppCfg(t, nil, providers...)
+}
+
+func newAppCfg(t *testing.T, mut func(*Config), providers ...ProviderConfig) *app {
 	a := &app{t: t, repo: &FakeRepo{Files: map[string][]byte{}}}
 	var h http.Handler
 	a.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.ServeHTTP(w, r) }))
 	t.Cleanup(a.srv.Close)
 	cfg := testConfig(t, providers...)
 	cfg.PublicURL = a.srv.URL
+	if mut != nil {
+		mut(cfg)
+	}
 	cookies, _ := NewCookies(make([]byte, 32), false)
 	h = NewServer(cfg, testRegistry(t), a.repo, nil, cookies).Handler()
 	jar, _ := cookiejar.New(nil)
@@ -314,17 +321,17 @@ func codeFor(t *testing.T, p *Provider, f *Flow) string {
 
 func TestPKCEAndNonceEnforced(t *testing.T) {
 	idp := newFakeIdP(t, map[string]any{"asn": "4242420010"})
-	p := NewProvider(&ProviderConfig{Name: "x", Issuer: idp.srv.URL, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}}, "https://app/cb")
+	p := NewProvider(&ProviderConfig{Name: "x", Issuer: idp.srv.URL, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}})
 
-	f := NewFlow("x")
+	f := NewFlow("x", "https://app/cb")
 	code := codeFor(t, p, f)
 	wrong := *f
-	wrong.Verifier = NewFlow("x").Verifier
+	wrong.Verifier = NewFlow("x", "https://app/cb").Verifier
 	if _, err := p.Claims(t.Context(), &wrong, code); err == nil {
 		t.Error("code redeemed with the wrong PKCE verifier")
 	}
 
-	f = NewFlow("x")
+	f = NewFlow("x", "https://app/cb")
 	code = codeFor(t, p, f)
 	badNonce := *f
 	badNonce.Nonce = "other"
@@ -332,7 +339,7 @@ func TestPKCEAndNonceEnforced(t *testing.T) {
 		t.Errorf("nonce mismatch accepted: %v", err)
 	}
 
-	f = NewFlow("x")
+	f = NewFlow("x", "https://app/cb")
 	claims, err := p.Claims(t.Context(), f, codeFor(t, p, f))
 	if err != nil || claims["sub"] != "user-1" || claims["asn"] != "4242420010" {
 		t.Errorf("good flow: %v %v", claims, err)

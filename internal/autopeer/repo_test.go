@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,7 +28,8 @@ type fakeGitHub struct {
 	mu    sync.Mutex
 	files map[string]string // path on main -> content
 	refs  map[string]string
-	added map[string]string // branch/path -> content
+	added   map[string]string // branch/path -> content
+	deleted map[string]bool   // branch/path
 	pulls []map[string]string
 	calls []string
 }
@@ -60,6 +62,46 @@ func (g *fakeGitHub) handler() http.Handler {
 				out = append(out, map[string]string{"type": "file", "name": name, "path": path})
 			}
 			json.NewEncoder(w).Encode(out)
+		case r.Method == "GET" && strings.HasPrefix(p, "/contents/peers/") && strings.HasPrefix(r.URL.Query().Get("ref"), "head-"):
+			// A PR head: "head-<branch>".
+			c, ok := g.added[strings.TrimPrefix(r.URL.Query().Get("ref"), "head-")+"/"+strings.TrimPrefix(p, "/contents/")]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": base64.StdEncoding.EncodeToString([]byte(c))})
+		case r.Method == "GET" && p == "/pulls":
+			var out []map[string]any
+			for i, pl := range g.pulls {
+				out = append(out, map[string]any{"number": i + 1, "html_url": "https://github.com/oscrx/dn42-peers/pull/" + strconv.Itoa(i+1),
+					"head": map[string]string{"sha": "head-" + pl["head"]}})
+			}
+			json.NewEncoder(w).Encode(out)
+		case r.Method == "GET" && strings.HasPrefix(p, "/pulls/") && strings.HasSuffix(p, "/files"):
+			n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(p, "/pulls/"), "/files"))
+			branch := g.pulls[n-1]["head"]
+			var out []map[string]string
+			for k := range g.added {
+				if path, ok := strings.CutPrefix(k, branch+"/"); ok {
+					out = append(out, map[string]string{"filename": path, "status": "added"})
+				}
+			}
+			for k := range g.deleted {
+				if path, ok := strings.CutPrefix(k, branch+"/"); ok {
+					out = append(out, map[string]string{"filename": path, "status": "removed"})
+				}
+			}
+			json.NewEncoder(w).Encode(out)
+		case r.Method == "DELETE" && strings.HasPrefix(p, "/contents/"):
+			var in map[string]string
+			json.NewDecoder(r.Body).Decode(&in)
+			path := strings.TrimPrefix(p, "/contents/")
+			if in["sha"] != "blob-"+path {
+				http.Error(w, "sha mismatch", 409)
+				return
+			}
+			g.deleted[in["branch"]+"/"+path] = true
+			w.Write([]byte("{}"))
 		case r.Method == "GET" && strings.HasPrefix(p, "/contents/peers/"):
 			c, ok := g.files[strings.TrimPrefix(p, "/contents/")]
 			if !ok {
@@ -72,7 +114,7 @@ func (g *fakeGitHub) handler() http.Handler {
 			for i := 0; i < len(enc); i += 60 {
 				wrapped.WriteString(enc[i:min(i+60, len(enc))] + "\n")
 			}
-			json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": wrapped.String()})
+			json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": wrapped.String(), "sha": "blob-" + strings.TrimPrefix(p, "/contents/")})
 		case r.Method == "GET" && p == "/git/ref/heads/main":
 			json.NewEncoder(w).Encode(map[string]any{"object": map[string]string{"sha": "abc123"}})
 		case r.Method == "POST" && p == "/git/refs":
@@ -141,7 +183,7 @@ func TestGitHubApp(t *testing.T) {
 	}
 	existing, _ := PeerYAML(func() *dn42v1.DN42Peer { p := existingPeer("old", 4242420001, 20001, "fe80::1"); return &p }())
 	fg := &fakeGitHub{t: t, pub: &key.PublicKey, files: map[string]string{"peers/4242420001-old.yaml": string(existing)},
-		refs: map[string]string{}, added: map[string]string{}}
+		refs: map[string]string{}, added: map[string]string{}, deleted: map[string]bool{}}
 	srv := httptest.NewServer(fg.handler())
 	defer srv.Close()
 	gh := &GitHubApp{Key: parsed, HTTPClient: srv.Client(), Cfg: GitHubConfig{APIURL: srv.URL, Owner: "oscrx", Repo: "dn42-peers",
@@ -162,6 +204,33 @@ func TestGitHubApp(t *testing.T) {
 	if len(fg.pulls) != 1 || fg.pulls[0]["head"] != "autopeer/x" || fg.pulls[0]["base"] != "main" {
 		t.Errorf("pulls: %v", fg.pulls)
 	}
+	// Pending: the open PR adds peers/4242420002-new.yaml ("hello" doesn't
+	// parse, so Peer is nil but the path is known).
+	pend, err := gh.PendingPeers(t.Context())
+	if err != nil || len(pend) != 1 || pend[0].Path != "peers/4242420002-new.yaml" || pend[0].Peer != nil ||
+		pend[0].URL != "https://github.com/oscrx/dn42-peers/pull/1" {
+		t.Fatalf("pending: %+v %v", pend, err)
+	}
+	// A removal PR: branch, delete with the blob sha, PR.
+	if _, err := gh.OpenPR(t.Context(), PullRequest{Branch: "autopeer/rm", Path: "peers/4242420001-old.yaml", Delete: true, Title: "Remove"}); err != nil {
+		t.Fatal(err)
+	}
+	if !fg.deleted["autopeer/rm/peers/4242420001-old.yaml"] {
+		t.Errorf("deleted: %v", fg.deleted)
+	}
+	// Now a parseable pending peer too.
+	good, _ := PeerYAML(func() *dn42v1.DN42Peer { p := existingPeer("new", 4242420003, 20003, "fe80::3"); return &p }())
+	fg.added["autopeer/x/peers/4242420002-new.yaml"] = string(good)
+	pend, _ = gh.PendingPeers(t.Context())
+	var sawRemove, sawNew bool
+	for _, p := range pend {
+		sawRemove = sawRemove || (p.Path == "peers/4242420001-old.yaml" && p.Peer == nil)
+		sawNew = sawNew || (p.Peer != nil && p.Peer.Name == "new")
+	}
+	if !sawRemove || !sawNew {
+		t.Errorf("pending: %+v", pend)
+	}
+
 	// The installation token is fetched once and reused.
 	n := 0
 	for _, c := range fg.calls {

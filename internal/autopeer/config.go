@@ -6,6 +6,7 @@ package autopeer
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -22,6 +23,12 @@ type Config struct {
 	// PublicURL is the base URL users reach the app on; redirect URIs are
 	// <publicURL>/auth/<provider>/callback.
 	PublicURL string `json:"publicURL"`
+	// ExtraPublicURLs are further hosts serving the same app (e.g. the
+	// .dn42 name). A login uses the base whose host matches the request;
+	// every base's callback must be registered with every provider.
+	ExtraPublicURLs []string `json:"extraPublicURLs,omitempty"`
+	// Limits on submissions (removals count too).
+	Limits LimitsConfig `json:"limits"`
 	// CookieKeyFile holds 32 random bytes (raw or base64) for the session
 	// cookies (AES-GCM).
 	CookieKeyFile string `json:"cookieKeyFile"`
@@ -33,6 +40,12 @@ type Config struct {
 	Registry   RegistryConfig   `json:"registry"`
 	GitHub     GitHubConfig     `json:"github"`
 	Kubernetes KubeConfig       `json:"kubernetes"`
+}
+
+// LimitsConfig caps how many PRs the app opens.
+type LimitsConfig struct {
+	PerLoginPerHour int `json:"perLoginPerHour"` // default 3
+	TotalPerHour    int `json:"totalPerHour"`    // default 20
 }
 
 // RouterConfig describes our side, shown in the peer's config.
@@ -161,7 +174,22 @@ func (c *Config) complete() error {
 	if c.PublicURL == "" {
 		return fmt.Errorf("publicURL is required")
 	}
-	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
+	var bases []string
+	for _, u := range append([]string{c.PublicURL}, c.ExtraPublicURLs...) {
+		u = strings.TrimRight(u, "/")
+		pu, err := url.Parse(u)
+		if err != nil || (pu.Scheme != "https" && pu.Scheme != "http") || pu.Host == "" || pu.Path != "" || pu.RawQuery != "" {
+			return fmt.Errorf("public URL %q must be scheme://host with no path", u)
+		}
+		bases = append(bases, u)
+	}
+	c.PublicURL, c.ExtraPublicURLs = bases[0], bases[1:]
+	if c.Limits.PerLoginPerHour == 0 {
+		c.Limits.PerLoginPerHour = 3
+	}
+	if c.Limits.TotalPerHour == 0 {
+		c.Limits.TotalPerHour = 20
+	}
 	if !peer.IsDN42ASN(c.Router.ASN) {
 		return fmt.Errorf("router.asn %d is not a DN42 ASN", c.Router.ASN)
 	}
@@ -219,6 +247,18 @@ func (c *Config) complete() error {
 		c.Kubernetes.Namespace = "dn42"
 	}
 	return nil
+}
+
+// BaseFor returns the configured base URL whose host is host (the request's
+// Host header), or the primary one. Only configured values are returned, so
+// a forged Host header can't redirect a login elsewhere.
+func (c *Config) BaseFor(host string) string {
+	for _, b := range append([]string{c.PublicURL}, c.ExtraPublicURLs...) {
+		if pu, err := url.Parse(b); err == nil && strings.EqualFold(pu.Host, host) {
+			return b
+		}
+	}
+	return c.PublicURL
 }
 
 // routerLinkLocal returns our link-local address.

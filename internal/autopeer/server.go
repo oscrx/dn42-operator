@@ -48,14 +48,16 @@ type Server struct {
 	Repo      PeerRepo
 	Status    StatusSource // optional
 	Cookies   *Cookies
+	Limiter   *Limiter
 }
 
 // NewServer wires providers from the config.
 func NewServer(cfg *Config, reg *registry.Registry, repo PeerRepo, status StatusSource, cookies *Cookies) *Server {
-	s := &Server{Cfg: cfg, Providers: map[string]*Provider{}, Registry: reg, Repo: repo, Status: status, Cookies: cookies}
+	s := &Server{Cfg: cfg, Providers: map[string]*Provider{}, Registry: reg, Repo: repo, Status: status, Cookies: cookies,
+		Limiter: &Limiter{PerKey: cfg.Limits.PerLoginPerHour, Total: cfg.Limits.TotalPerHour}}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		s.Providers[p.Name] = NewProvider(p, fmt.Sprintf("%s/auth/%s/callback", cfg.PublicURL, p.Name))
+		s.Providers[p.Name] = NewProvider(p)
 	}
 	return s
 }
@@ -69,6 +71,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /peer/new", s.newPeer)
 	mux.HandleFunc("POST /peer", s.submitPeer)
+	mux.HandleFunc("POST /peer/remove", s.removePeer)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
@@ -135,6 +138,10 @@ type PeerView struct {
 	Routes      string
 	Valid       string
 	ValidReason string
+	// Removable: an autopeer (no keyRef) without a PR already pending.
+	Removable bool
+	// PendingURL is an open PR for this peer.
+	PendingURL string
 }
 
 func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error) {
@@ -150,12 +157,24 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 			}
 		}
 	}
+	pendingByPath := map[string]Pending{}
+	var pending []Pending
+	if pending, err = s.Repo.PendingPeers(ctx); err == nil {
+		for _, pd := range pending {
+			pendingByPath[pd.Path] = pd
+		}
+	}
 	var out []PeerView
+	inRepoPaths := map[string]bool{}
 	for _, p := range inRepo {
 		if !id.May(p.Spec.ASN) {
 			continue
 		}
 		v := PeerView{Name: p.Name, ASN: p.Spec.ASN, File: PeerFileName(s.Cfg.GitHub.PeersDir, &p)}
+		inRepoPaths[v.File] = true
+		pd, isPending := pendingByPath[v.File]
+		v.PendingURL = pd.URL
+		v.Removable = p.Spec.KeyRef == "" && !isPending && err == nil
 		if p.Spec.ListenPort != nil {
 			v.ListenPort = *p.Spec.ListenPort
 		}
@@ -176,6 +195,16 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 		}
 		out = append(out, v)
 	}
+	// New peers still in review.
+	for _, pd := range pending {
+		if pd.Peer != nil && !inRepoPaths[pd.Path] && id.May(pd.Peer.Spec.ASN) {
+			v := PeerView{Name: pd.Peer.Name, ASN: pd.Peer.Spec.ASN, File: pd.Path, PendingURL: pd.URL}
+			if pd.Peer.Spec.ListenPort != nil {
+				v.ListenPort = *pd.Peer.Spec.ListenPort
+			}
+			out = append(out, v)
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
@@ -186,7 +215,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "Unknown login provider.")
 		return
 	}
-	f := NewFlow(p.Config.Name)
+	f := NewFlow(p.Config.Name, fmt.Sprintf("%s/auth/%s/callback", s.Cfg.BaseFor(r.Host), p.Config.Name))
 	u, err := p.AuthCodeURL(r.Context(), f)
 	if err != nil {
 		ctrl.Log.WithName("autopeer").Error(err, "login")
@@ -294,6 +323,24 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusServiceUnavailable, "Could not check the existing peers, please try later.")
 		return
 	}
+	pending, err := s.Repo.PendingPeers(r.Context())
+	if err != nil {
+		log.Error(err, "pending peers")
+		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
+		return
+	}
+	// Peers in open PRs count as taken: same name, port or neighbor can't
+	// be requested twice while one is in review.
+	known := map[string]bool{}
+	for _, e := range existing {
+		known[e.Name] = true
+	}
+	for _, pd := range pending {
+		if pd.Peer != nil && !known[pd.Peer.Name] {
+			existing = append(existing, *pd.Peer)
+			known[pd.Peer.Name] = true
+		}
+	}
 	req := Request{ASN: asn, Name: form["name"], PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"]}
 	obj, p, err := BuildPeer(s.Cfg, &sess.Identity, req, existing)
 	var fe *FieldError
@@ -315,6 +362,10 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := PeerFileName(s.Cfg.GitHub.PeersDir, obj)
+	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
+		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		return
+	}
 	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
 		Branch:  fmt.Sprintf("autopeer/%d-%s-%s", obj.Spec.ASN, obj.Name, randomString(4)),
 		Path:    path,
@@ -331,4 +382,70 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	log.Info("peer submitted", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
 	s.render(w, http.StatusOK, "done.html", map[string]any{
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
+}
+
+func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
+	log := ctrl.Log.WithName("autopeer")
+	sess := s.session(r)
+	if sess == nil {
+		s.fail(w, http.StatusUnauthorized, "Please log in first.")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
+		s.fail(w, http.StatusForbidden, "The form expired, please reload it.")
+		return
+	}
+	name := r.PostFormValue("name")
+	peers, err := s.Repo.ListPeers(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusServiceUnavailable, "Could not load the peers, please try later.")
+		return
+	}
+	var target *dn42v1.DN42Peer
+	for i := range peers {
+		if peers[i].Name == name {
+			target = &peers[i]
+		}
+	}
+	// Same answer for "doesn't exist" and "not yours".
+	if target == nil || !sess.Identity.May(target.Spec.ASN) {
+		s.fail(w, http.StatusNotFound, "No such peering of yours.")
+		return
+	}
+	if target.Spec.KeyRef != "" {
+		s.fail(w, http.StatusForbidden, "This peering was set up by hand; ask AS"+strconv.FormatInt(s.Cfg.Router.ASN, 10)+" to remove it.")
+		return
+	}
+	path := PeerFileName(s.Cfg.GitHub.PeersDir, target)
+	pending, err := s.Repo.PendingPeers(r.Context())
+	if err != nil {
+		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
+		return
+	}
+	for _, pd := range pending {
+		if pd.Path == path {
+			s.fail(w, http.StatusConflict, "There is already an open request for this peering: "+pd.URL)
+			return
+		}
+	}
+	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
+		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		return
+	}
+	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
+		Branch: fmt.Sprintf("autopeer/remove-%d-%s-%s", target.Spec.ASN, target.Name, randomString(4)),
+		Path:   path,
+		Delete: true,
+		Title:  fmt.Sprintf("Remove peer AS%d %s", target.Spec.ASN, target.Name),
+		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: `%s`\n",
+			target.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
+	})
+	if err != nil {
+		log.Error(err, "open removal PR", "peer", target.Name)
+		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
+		return
+	}
+	log.Info("peer removal requested", "peer", target.Name, "asn", target.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
+	s.render(w, http.StatusOK, "removed.html", map[string]any{"Session": sess, "PR": prURL, "Name": target.Name})
 }

@@ -28,21 +28,34 @@ import (
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 )
 
-// PullRequest is a change adding one peer file.
+// PullRequest is a change adding, changing or (Delete) removing one peer file.
 type PullRequest struct {
 	Branch  string
 	Path    string
 	Content []byte
+	Delete  bool
 	Title   string
 	Body    string
+}
+
+// Pending is a peer file changed by an open PR.
+type Pending struct {
+	URL  string
+	Path string
+	// Peer is the file in the PR; nil when the PR deletes it or it doesn't
+	// parse (the gate rejects those anyway).
+	Peer *dn42v1.DN42Peer
 }
 
 // PeerRepo is the peers repository (oscrx/dn42-peers).
 type PeerRepo interface {
 	// ListPeers returns the DN42Peer files on the base branch.
 	ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error)
-	// OpenPR creates a branch with the file and opens a PR; returns its URL.
+	// OpenPR creates a branch with the change and opens a PR; returns its URL.
 	OpenPR(ctx context.Context, pr PullRequest) (string, error)
+	// PendingPeers lists the peer files touched by open PRs, so a second
+	// request can't take a name, port or neighbor that is still in review.
+	PendingPeers(ctx context.Context) ([]Pending, error)
 }
 
 // ParsePeerFile parses one peer file strictly.
@@ -98,6 +111,23 @@ func (f *FakeRepo) OpenPR(_ context.Context, pr PullRequest) (string, error) {
 	}
 	f.PRs = append(f.PRs, pr)
 	return fmt.Sprintf("https://github.com/example/peers/pull/%d", len(f.PRs)), nil
+}
+
+// PendingPeers treats every recorded PR as open.
+func (f *FakeRepo) PendingPeers(context.Context) ([]Pending, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []Pending
+	for i, pr := range f.PRs {
+		p := Pending{URL: fmt.Sprintf("https://github.com/example/peers/pull/%d", i+1), Path: pr.Path}
+		if !pr.Delete {
+			if obj, err := ParsePeerFile(pr.Content); err == nil {
+				p.Peer = obj
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
 }
 
 // GitHubApp is a PeerRepo using the GitHub REST API as a GitHub App
@@ -251,6 +281,7 @@ type contentEntry struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	SHA     string `json:"sha"`
 }
 
 // ListPeers reads every *.yaml in the peers dir on the base branch.
@@ -301,7 +332,17 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr PullRequest) (string, error) 
 		map[string]string{"ref": "refs/heads/" + pr.Branch, "sha": ref.Object.SHA}, nil); err != nil {
 		return "", fmt.Errorf("create branch: %w", err)
 	}
-	if err := g.api(ctx, http.MethodPut, g.repoPath("/contents/%s", escapePath(pr.Path)), map[string]string{
+	if pr.Delete {
+		var cur contentEntry
+		if err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(pr.Path), url.QueryEscape(pr.Branch)), nil, &cur); err != nil {
+			return "", fmt.Errorf("find file: %w", err)
+		}
+		if err := g.api(ctx, http.MethodDelete, g.repoPath("/contents/%s", escapePath(pr.Path)), map[string]string{
+			"message": pr.Title, "sha": cur.SHA, "branch": pr.Branch,
+		}, nil); err != nil {
+			return "", fmt.Errorf("delete file: %w", err)
+		}
+	} else if err := g.api(ctx, http.MethodPut, g.repoPath("/contents/%s", escapePath(pr.Path)), map[string]string{
 		"message": pr.Title,
 		"content": base64.StdEncoding.EncodeToString(pr.Content),
 		"branch":  pr.Branch,
@@ -317,6 +358,49 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr PullRequest) (string, error) 
 		return "", fmt.Errorf("open PR: %w", err)
 	}
 	return out.HTMLURL, nil
+}
+
+// PendingPeers reads the open PRs and the peer files they change (at the
+// PR head).
+func (g *GitHubApp) PendingPeers(ctx context.Context) ([]Pending, error) {
+	var pulls []struct {
+		Number  int    `json:"number"`
+		HTMLURL string `json:"html_url"`
+		Head    struct {
+			SHA string `json:"sha"`
+		} `json:"head"`
+	}
+	if err := g.api(ctx, http.MethodGet, g.repoPath("/pulls?state=open&per_page=100"), nil, &pulls); err != nil {
+		return nil, fmt.Errorf("open PRs: %w", err)
+	}
+	var out []Pending
+	for _, pl := range pulls {
+		var files []struct {
+			Filename string `json:"filename"`
+			Status   string `json:"status"`
+		}
+		if err := g.api(ctx, http.MethodGet, g.repoPath("/pulls/%d/files?per_page=100", pl.Number), nil, &files); err != nil {
+			return nil, fmt.Errorf("files of PR %d: %w", pl.Number, err)
+		}
+		for _, f := range files {
+			if !strings.HasPrefix(f.Filename, strings.TrimRight(g.Cfg.PeersDir, "/")+"/") {
+				continue
+			}
+			p := Pending{URL: pl.HTMLURL, Path: f.Filename}
+			if f.Status != "removed" && strings.HasSuffix(f.Filename, ".yaml") {
+				var c contentEntry
+				if err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(f.Filename), url.QueryEscape(pl.Head.SHA)), nil, &c); err == nil {
+					if b, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(c.Content, "\n", "")); err == nil {
+						if obj, err := ParsePeerFile(b); err == nil {
+							p.Peer = obj
+						}
+					}
+				}
+			}
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 func escapePath(p string) string {

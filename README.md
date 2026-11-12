@@ -260,9 +260,20 @@ The flow:
 4. **PR**: `peers/<asn>-<name>.yaml` on a new branch in the peers repo,
    through a GitHub App (JWT → installation token → branch, file, PR). The
    page shows the WireGuard and BIRD config for the peer's side.
-5. **Status**: the home page lists the login's peers from the repo, with
-   live state (BGP state, handshake, routes, Valid) from the cluster when
-   `kubernetes.enabled`.
+5. **Status**: the home page lists the login's peers from the repo, plus
+   new ones still in an open PR. It shows live state (BGP state, handshake,
+   routes, Valid) from the cluster when `kubernetes.enabled`.
+6. **Removal**: an autopeer (no `keyRef`) gets a Remove button, which opens
+   a PR deleting its file. Hand-managed peers can't be removed through the
+   app; the gate enforces the same rule.
+
+Peers in open PRs count as taken: a second request can't reuse their name,
+port or ASN + neighbor while the first is in review, and a peer with an
+open PR can't be removed. One deployment serves several hosts
+(`extraPublicURLs`). A login's redirect URI is the configured base matching
+the request's host, so a forged `Host` header can't send it elsewhere.
+Submissions and removals are rate limited per login and in total
+(`limits`, in memory).
 
 `--fake-repo` keeps PRs in memory for local runs. The tests run the full
 flow against a fake OIDC/OAuth provider that enforces PKCE and nonce, and the
@@ -317,10 +328,8 @@ versions and `case.yaml` with the diff, author and expected outcome.
 
 ## Not done yet
 
-- autopeer: the provider checks above; one deployment serving both hosts
-  (`publicURL` is single-valued today); rate limiting and duplicate-PR
-  detection (an open PR for the same name isn't seen until it's merged);
-  peer deletion through the app (the plan: a PR removing the file).
+- autopeer: the provider checks above; editing an existing autopeer (today:
+  remove and request again).
 - Tag a release so the peers repo workflow's pinned
   `go install .../cmd/peercheck@v0.1.0` resolves (after the repo is public).
 
