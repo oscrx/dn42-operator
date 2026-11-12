@@ -1,0 +1,22 @@
+# Floating WireGuard endpoint. The operator owns spec.ports (server-side
+# apply, field manager dn42-operator); keep only a placeholder here and have
+# ArgoCD ignore the rest of spec.ports.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dn42-endpoint
+  namespace: dn42
+  annotations:
+    lbipam.cilium.io/ips: "2a05:f080:0:38ff::4242" # example
+spec:
+  type: LoadBalancer
+  # Announced only from the node whose router pod is ready, i.e. the leader.
+  externalTrafficPolicy: Local
+  ipFamilies: [IPv6]
+  ipFamilyPolicy: SingleStack
+  selector:
+    app.kubernetes.io/name: dn42-router
+  ports:
+    - name: placeholder
+      protocol: UDP
+      port: 20000

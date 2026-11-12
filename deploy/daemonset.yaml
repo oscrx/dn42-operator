@@ -1,0 +1,72 @@
+# Example only; the real manifests live in uber-kubernetes.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dn42-router
+  namespace: dn42
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dn42-router
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dn42-router
+    spec:
+      serviceAccountName: dn42-operator
+      nodeSelector:
+        dn42.oscarr.nl/router: "true"
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: bird
+          image: ghcr.io/oscrx/bird2:2.17 # see images/bird/Dockerfile
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - {name: bird-conf, mountPath: /etc/bird/bird.conf, subPath: bird.conf, readOnly: true}
+            - {name: peers, mountPath: /etc/bird/peers, readOnly: true}
+            - {name: run, mountPath: /run/bird}
+        - name: operator
+          image: ghcr.io/oscrx/dn42-operator:v0.1.0
+          args:
+            - --key-secret=dn42-wireguard-keys
+            - --shared-key=autopeer
+            - --vrf=vrf-dn42
+            - --endpoint-service=dn42-endpoint
+            - --control-configmap=dn42-operator-control
+            - --bird-socket=/run/bird/bird.ctl
+            - --peers-dir=/etc/bird/peers
+            - --metrics-bind-address=:9842
+            - --health-probe-bind-address=:9843
+          env:
+            - name: NODE_NAME
+              valueFrom: {fieldRef: {fieldPath: spec.nodeName}}
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          securityContext:
+            privileged: true # netlink, wireguard, /proc/sys in the host netns
+          ports:
+            - {name: metrics, containerPort: 9842}
+          # Ready only on the leader with a completed pass, so the
+          # externalTrafficPolicy: Local Service follows the lease.
+          readinessProbe:
+            httpGet: {path: /readyz, port: 9843}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9843}
+            periodSeconds: 20
+          volumeMounts:
+            - {name: peers, mountPath: /etc/bird/peers}
+            - {name: run, mountPath: /run/bird}
+      volumes:
+        - name: bird-conf
+          configMap: {name: dn42-bird-conf}
+        - name: peers
+          emptyDir: {}
+        - name: run
+          emptyDir: {}

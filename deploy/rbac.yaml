@@ -1,0 +1,56 @@
+# Least privilege: the peers, their status, one Secret, one Service, one
+# ConfigMap and the Lease, all in the dn42 namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dn42-operator
+  namespace: dn42
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dn42-operator
+  namespace: dn42
+rules:
+  - apiGroups: [dn42.oscarr.nl]
+    resources: [dn42peers]
+    verbs: [get, list, watch]
+  - apiGroups: [dn42.oscarr.nl]
+    resources: [dn42peers/status]
+    verbs: [get, patch, update]
+  # The key Secret only (watched with a metadata.name field selector).
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [dn42-wireguard-keys]
+    verbs: [get, list, watch]
+  # spec.ports of the floating endpoint Service, via server-side apply.
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [dn42-endpoint]
+    verbs: [get, patch]
+  # Confirmation for a blocked mass deletion.
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [dn42-operator-control]
+    verbs: [get]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [create]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    resourceNames: [dn42-operator]
+    verbs: [get, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dn42-operator
+  namespace: dn42
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dn42-operator
+subjects:
+  - kind: ServiceAccount
+    name: dn42-operator
+    namespace: dn42
