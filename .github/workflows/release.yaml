@@ -1,0 +1,165 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  # Publishes moving :main tags so the latest commit is deployable without
+  # cutting a release.
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Granted per job rather than here: with more than one job, a workflow-level
+# write is handed to every job whether it needs it or not.
+permissions:
+  contents: read
+
+jobs:
+  # A release must never ship something that does not pass its own tests.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          # No cache. Cache entries are writable from lower-privileged
+          # workflows, so restoring one here would let a pull request
+          # influence what gets signed and published.
+          cache: false
+
+      - name: Test
+        run: go test -race -count=1 ./...
+
+      - name: Kernel modules
+        run: sudo modprobe -a wireguard vrf
+
+      - name: Integration tests
+        run: make integration
+
+  image:
+    name: Build and push ${{ matrix.name }}
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Needed for cosign keyless signing via the GitHub OIDC provider.
+      id-token: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # The operator: root, privileged on the router node.
+          - name: operator
+            image: ghcr.io/oscrx/dn42-operator
+            context: .
+            target: operator
+          # The public web front end: nonroot, only the autopeer binary.
+          - name: autopeer
+            image: ghcr.io/oscrx/dn42-autopeer
+            context: .
+            target: autopeer
+          # BIRD for the dn42-bird DaemonSet, versioned with the operator.
+          - name: bird
+            image: ghcr.io/oscrx/bird2
+            context: images/bird
+            target: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ${{ matrix.image }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,format=long
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+          # No build cache: same reason as the test job.
+          no-cache: true
+
+      # Pinned to an exact release: this action publishes no floating major
+      # tag, so @v4 does not resolve.
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Sign the image
+        # Keyless signing: the identity is this workflow, so consumers can
+        # verify provenance without any long-lived key material.
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Summary
+        env:
+          IMAGE: ${{ matrix.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo "### ${IMAGE}"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+            echo
+            echo "Digest: \`${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Last, so a release page only appears once everything it points at exists.
+  # The tag is also what the peers repo's gate installs (peercheck@<tag>).
+  github-release:
+    name: Create the GitHub release
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # A re-run after a later job failed must not trip over its own release.
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists."
+            exit 0
+          fi
+          gh release create "$TAG" --repo "$REPO" --verify-tag --generate-notes --title "$TAG"

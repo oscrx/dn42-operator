@@ -1,13 +1,26 @@
-# Example only. The autopeer web app: same image as the operator, command
-# /autopeer. Read-only on DN42Peer (status page); PRs go through the GitHub
-# App, never the cluster. A git-sync sidecar keeps the registry clone fresh.
+# Example only. The autopeer web app is the one public-facing part, so it
+# runs with the least privilege: its own image (ghcr.io/oscrx/dn42-autopeer,
+# nonroot, only the autopeer binary), its own namespace with PodSecurity
+# "restricted", and read-only access to DN42Peer objects in dn42 (for the
+# status page). It never writes to the cluster: changes go out as PRs through
+# the GitHub App. A git-sync sidecar keeps the registry clone fresh.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dn42-autopeer
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
 apiVersion: v1
 kind: ServiceAccount
-metadata: {name: dn42-autopeer, namespace: dn42}
+metadata: {name: dn42-autopeer, namespace: dn42-autopeer}
 ---
+# In dn42, where the DN42Peer objects live: read only, nothing else.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
-metadata: {name: dn42-autopeer, namespace: dn42}
+metadata: {name: dn42-autopeer-read-peers, namespace: dn42}
 rules:
   - apiGroups: [dn42.oscarr.nl]
     resources: [dn42peers]
@@ -15,38 +28,58 @@ rules:
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
-metadata: {name: dn42-autopeer, namespace: dn42}
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: dn42-autopeer}
-subjects: [{kind: ServiceAccount, name: dn42-autopeer, namespace: dn42}]
+metadata: {name: dn42-autopeer-read-peers, namespace: dn42}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: dn42-autopeer-read-peers}
+subjects: [{kind: ServiceAccount, name: dn42-autopeer, namespace: dn42-autopeer}]
 ---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: dn42-autopeer, namespace: dn42}
+metadata: {name: dn42-autopeer, namespace: dn42-autopeer}
 spec:
-  replicas: 1
+  replicas: 1 # rate limits are in memory, per replica
   selector: {matchLabels: {app.kubernetes.io/name: dn42-autopeer}}
   template:
     metadata: {labels: {app.kubernetes.io/name: dn42-autopeer}}
     spec:
       serviceAccountName: dn42-autopeer
-      securityContext: {runAsNonRoot: true, runAsUser: 65532, fsGroup: 65532}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
       containers:
         - name: autopeer
-          image: ghcr.io/oscrx/dn42-operator:v0.1.0
-          command: [/autopeer, --config=/etc/autopeer/config.yaml]
+          image: ghcr.io/oscrx/dn42-autopeer:0.1.0
+          args: [--config=/etc/autopeer/config.yaml] # kubernetes.namespace: dn42 (where the peers are)
           ports: [{name: http, containerPort: 8080}]
           readinessProbe: {httpGet: {path: /healthz, port: http}}
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 128Mi}
+          securityContext: &locked
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: config, mountPath: /etc/autopeer, readOnly: true}
             - {name: secrets, mountPath: /secrets, readOnly: true}
             - {name: registry, mountPath: /registry-root, readOnly: true}
         - name: git-sync
           image: registry.k8s.io/git-sync/git-sync:v4.4.0
-          args: [--repo=https://git.dn42.dev/dn42/registry.git, --root=/registry-root, --link=registry, --period=1h, --depth=1]
-          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
-          volumeMounts: [{name: registry, mountPath: /registry-root}]
+          # git.dn42.dev needs an account: a read-only token in the secret.
+          args: [--repo=https://git.dn42.dev/dn42/registry.git, --root=/registry-root, --link=registry,
+                 --period=1h, --depth=1, --username=REGISTRY-ACCOUNT, --password-file=/secrets/registry-token]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 256Mi}
+          securityContext: *locked
+          volumeMounts:
+            - {name: registry, mountPath: /registry-root}
+            - {name: tmp, mountPath: /tmp}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
       volumes:
-        - {name: config, configMap: {name: dn42-autopeer-config}}  # see autopeer-config.example.yaml (registry.path: /registry-root/registry)
-        - {name: secrets, secret: {secretName: dn42-autopeer}}       # cookie-key, github-app.pem, client secrets
+        - {name: config, configMap: {name: dn42-autopeer-config}} # see autopeer-config.example.yaml (registry.path: /registry-root/registry)
+        - {name: secrets, secret: {secretName: dn42-autopeer}}       # cookie-key, github-app.pem, client secrets, registry-token
         - {name: registry, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}

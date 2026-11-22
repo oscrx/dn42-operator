@@ -1,22 +1,79 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "helpers:pinGitHubActionDigests"],
-  "postUpdateOptions": ["gomodTidy"],
-  "packageRules": [
-    {
-      "matchManagers": ["gomod"],
-      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/**"],
-      "groupName": "kubernetes"
-    }
+  "extends": [
+    "config:recommended",
+    ":automergeMinor",
+    ":semanticCommits",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests"
   ],
+  "description": [
+    "Status checks are deliberately NOT skipped. CI (unit, lint, the privileged integration tests) passing is the only thing standing between an automerged bump and a broken router.",
+    "platformAutomerge is on, which hands the merge to GitHub so a PR lands the moment its last check goes green. This is only safe because the main ruleset marks every CI check required; without that GitHub would treat a PR as mergeable the instant it opened.",
+    "Actions are pinned to commit SHAs. A tag like v7 is mutable, so a compromised or retagged action would land in this pipeline without any config change here. Renovate keeps the SHAs current and writes the version alongside as a comment.",
+    "Base images are pinned to digests for the same reason: golang, distroless and debian:trixie-slim are rebuilt in place, so the bytes behind a tag change without any commit here.",
+    "gomodTidy is required because Renovate updates go.mod and go.sum with go get, which never prunes. CI fails on the tidy check otherwise."
+  ],
+  "platformAutomerge": true,
+  "postUpdateOptions": ["gomodTidy"],
   "customManagers": [
     {
+      "description": "make lint pins the same golangci-lint as ci.yaml.",
       "customType": "regex",
-      "description": "controller-gen in CI",
-      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
-      "matchStrings": ["controller-gen@(?<currentValue>v[0-9.]+)"],
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": ["GOLANGCI_LINT_VERSION \\?= (?<currentValue>v\\S+)"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases"
+    },
+    {
+      "description": "controller-gen generates the CRD; CI checks the committed output with the same version.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^Makefile$/"],
+      "matchStrings": ["CONTROLLER_GEN_VERSION \\?= (?<currentValue>v\\S+)"],
       "depNameTemplate": "sigs.k8s.io/controller-tools",
       "datasourceTemplate": "go"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The go.mod toolchain is what CI tests with and the golang image is what the images compile with (two Dockerfiles), so they move in one PR. make toolchain.verify fails the PR until all have landed in it.",
+      "groupName": "go",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["toolchain"]
+    },
+    {
+      "description": "See the go group above.",
+      "groupName": "go",
+      "matchManagers": ["dockerfile"],
+      "matchPackageNames": ["golang", "docker.io/library/golang"]
+    },
+    {
+      "description": "Move golangci-lint in ci.yaml and the Makefile together, so local lint and CI never disagree.",
+      "groupName": "golangci-lint",
+      "matchPackageNames": ["golangci/golangci-lint"]
+    },
+    {
+      "description": "The Kubernetes libraries are released together and will not compile apart, so update them as one PR.",
+      "groupName": "kubernetes",
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/controller-runtime", "sigs.k8s.io/controller-tools"]
+    },
+    {
+      "description": "0.x modules where a minor bump is a Kubernetes release and routinely needs code changes. Review them rather than automerging.",
+      "matchPackageNames": ["k8s.io/**", "sigs.k8s.io/controller-runtime", "sigs.k8s.io/controller-tools"],
+      "matchUpdateTypes": ["minor"],
+      "automerge": false
+    },
+    {
+      "description": "The BIRD image's Debian base changes BIRD itself (2.17 today). A BIRD minor can change behaviour on the router, and the dn42-bird DaemonSet only restarts by hand, so review it.",
+      "matchFileNames": ["images/bird/Dockerfile"],
+      "matchUpdateTypes": ["major", "minor"],
+      "automerge": false
+    },
+    {
+      "description": "Action and base-image digests are safe to take unattended once CI is green.",
+      "matchManagers": ["github-actions", "dockerfile"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "automerge": true
     }
   ]
 }

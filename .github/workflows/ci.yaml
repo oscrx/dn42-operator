@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # The k3s job runs on main and on demand.
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref; the latest push is the one that matters.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          # Single source of truth: the toolchain comes from go.mod.
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check the images build with the tested Go
+        run: make toolchain.verify
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l -s .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt -s:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Generated code is up to date
+        # The DN42Peer CRD and deepcopy come from controller-gen; a type
+        # change without make generate would ship a stale CRD.
+        run: make generate.verify
+
+      - name: Vet
+        # Includes the Linux-only netlink code and the integration tests.
+        run: make vet
+
+      - name: Test
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Coverage summary
+        run: go tool cover -func=coverage.out | tail -1 >> "$GITHUB_STEP_SUMMARY"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # goinstall builds the linter from source with this repo's toolchain: a
+      # prebuilt release compiled with an older Go refuses to run against a
+      # newer go directive. The version stays pinned (and matches the Makefile).
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          version: v2.15.0
+          install-mode: goinstall
+          args: --timeout=5m --build-tags integration
+
+  workflows:
+    name: Audit workflows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Findings go to the Security tab as SARIF.
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Static analysis of the workflows themselves: shell injection through
+      # ${{ }} interpolation, the checkout token persisting into later steps,
+      # caches writable by lower-privileged workflows, over-broad permissions.
+      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+
+  build:
+    name: Build ${{ matrix.name }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: operator
+            context: .
+            target: operator
+          - name: autopeer
+            context: .
+            target: autopeer
+          - name: bird
+            context: images/bird
+            target: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      # Both platforms, to catch a cross-compilation break, but no push:
+      # publishing happens only from release.yaml.
+      - name: Build (no push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ${{ matrix.context }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  renovate-config:
+    name: Validate Renovate config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Renovate stops raising PRs entirely when its config is invalid, which
+      # is silent unless you go looking. Catch it here.
+      - name: Validate
+        run: npx --yes --package renovate renovate-config-validator --strict renovate.json
+
+  manifests:
+    name: Validate manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # kubeconform needs no cluster, unlike kubectl --dry-run=client.
+      - name: Install kubeconform
+        run: |
+          version=v0.6.7
+          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${version}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+          kubeconform -v
+
+      - name: Validate
+        # Built-in kinds strictly; DN42Peer (our own CRD) isn't in any schema
+        # catalogue, so it is skipped here and exercised by the integration and
+        # k3s tests instead. The autopeer config is not a Kubernetes object.
+        run: |
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            -ignore-filename-pattern 'autopeer-config' \
+            -schema-location default \
+            deploy/ config/crd/ test/k3s/
+
+  integration:
+    name: Integration (VRF, WireGuard, BIRD)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Kernel modules
+        run: sudo modprobe -a wireguard vrf
+
+      # A privileged container builds a real vrf-dn42, WireGuard links and
+      # BIRD, plus a second network namespace as the peer, up to BGP
+      # Established.
+      - name: Integration tests
+        run: make integration
+
+  k3s:
+    name: k3s rolling update and failover
+    # Slow (a three-node cluster in Docker); on main and on demand.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Kernel modules
+        run: sudo modprobe -a wireguard vrf
+
+      - name: k3s test
+        run: make k3s-test

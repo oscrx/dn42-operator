@@ -17,10 +17,15 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
  && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
     go build -trimpath -ldflags="-s -w" -o /out/autopeer ./cmd/autopeer
 
-# distroless static as root, not :nonroot: the operator needs netlink,
-# wgctrl and /proc/sys in the host network namespace (the pod is privileged).
-# autopeer ships in the same image and runs as 65532 (its Deployment sets it).
-FROM gcr.io/distroless/static@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383
-COPY --from=build /out/dn42-operator /dn42-operator
+# Two images from one build, one binary each:
+#   --target autopeer  the public web front end: nonroot, nothing else inside
+#   (default)          dn42-operator: root, because it needs netlink, wgctrl
+#                      and /proc/sys in the host network namespace
+FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS autopeer
 COPY --from=build /out/autopeer /autopeer
+USER 65532:65532
+ENTRYPOINT ["/autopeer"]
+
+FROM gcr.io/distroless/static@sha256:1a64f46364620465ef9e9a8f5413757dfdf22695e050bbfd7303eeaf17a59383 AS operator
+COPY --from=build /out/dn42-operator /dn42-operator
 ENTRYPOINT ["/dn42-operator"]

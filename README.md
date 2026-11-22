@@ -218,7 +218,8 @@ network, so pick free ports.
 
 ```
 make generate     # deepcopy + CRD (controller-gen)
-make test         # unit tests, any OS
+make verify       # toolchain, generated code, vet, lint, tests
+make test         # unit tests with -race, any OS
 make integration  # Linux tests in a privileged container, on the BIRD image
 make k3s-test     # rolling update + failover on a 3-node k3s in Docker
 make image
@@ -240,10 +241,14 @@ They need `--privileged` and must not run on a host.
 
 ## autopeer
 
-`cmd/autopeer` is the web front end, shipped in the same image (command
-`/autopeer --config ...`). Example config: `deploy/autopeer-config.example.yaml`.
-Example Deployment, with a git-sync sidecar for the registry and read-only
-RBAC on `dn42peers`: `deploy/autopeer.yaml`.
+`cmd/autopeer` is the web front end. It has its own image,
+`ghcr.io/oscrx/dn42-autopeer`: distroless nonroot, with only the autopeer
+binary in it. It is the one public-facing part, so it runs with the least
+privilege: its own namespace with PodSecurity `restricted`, and read-only
+access to `dn42peers` in `dn42` for the status page. It never writes to the
+cluster; changes go out as PRs. Example config: `deploy/autopeer-config.example.yaml`.
+Example namespace, Deployment (with a git-sync sidecar for the registry)
+and RBAC: `deploy/autopeer.yaml`.
 
 The flow:
 
@@ -344,20 +349,28 @@ versions and `case.yaml` with the diff, author and expected outcome.
 
 ## CI and releases
 
-- `.github/workflows/ci.yml` runs on every push and PR:
-  - gofmt, vet, a check that the generated code is current (controller-gen
-    v0.23.0) and the unit tests
-  - `make integration` in a privileged container
-  - `make k3s-test` on pushes to main
-- `.github/workflows/release.yml` runs on a `v*` tag. It builds multi-arch
-  images and pushes them to `ghcr.io/oscrx/dn42-operator` (operator and
-  autopeer) and `ghcr.io/oscrx/bird2`. The same tag is what the peers
-  repo's gate installs with `go install .../cmd/peercheck@<tag>`.
-- Actions are pinned to commit SHAs; `renovate.json` keeps them, Go modules
-  and controller-gen current.
+Same conventions as tlsa-dnsendpoint-controller; see
+[.github/PIPELINE.md](.github/PIPELINE.md).
 
-None of this has run on GitHub yet: the workflows pass actionlint and their
-commands pass locally.
+- `ci.yaml`, on every push and PR:
+  - tests with `-race`, and checks for tidy modules, gofmt, current generated code and the toolchain
+  - golangci-lint, a zizmor audit of the workflows
+  - multi-arch builds of all three images
+  - the Renovate validator and kubeconform
+  - the privileged integration tests
+  - the k3s test (on main)
+- `release.yaml`, on a `v*` tag:
+  - tests first, without any cache
+  - signed images: `ghcr.io/oscrx/dn42-operator`, `dn42-autopeer` and `bird2`
+  - then the GitHub release
+- Actions and base images are pinned by digest. Renovate keeps them current
+  and automerges digests and minor bumps once CI is green. Kubernetes minors
+  and the BIRD base image are reviewed by hand.
+
+`make verify` runs the test and lint jobs locally; `make help` lists the
+rest. None of the workflows has run on GitHub yet. Locally they pass
+actionlint and zizmor, the Renovate config validates, and their commands
+pass.
 
 ## License
 
