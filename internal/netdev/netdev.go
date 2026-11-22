@@ -65,6 +65,8 @@ type Spec struct {
 	Endpoint *net.UDPAddr
 	// Address is our link-local address, as /64.
 	Address netip.Prefix
+	// MTU of the link (0: leave as is).
+	MTU int
 }
 
 // WGPeer is the actual WireGuard peer state.
@@ -82,6 +84,7 @@ type State struct {
 	Alias      string
 	Master     string // name of the master link (VRF), "" if none
 	Up         bool
+	MTU        int
 	Addresses  []netip.Prefix
 	Sysctls    map[string]string
 	PrivateKey wgtypes.Key
@@ -109,6 +112,7 @@ type Plan struct {
 	AddAddrs    []netip.Prefix
 	DelAddrs    []netip.Prefix
 	SetUp       bool
+	SetMTU      int // 0: unchanged
 	WireGuard   *wgtypes.Config
 	Description []string // human-readable, for logs
 }
@@ -151,6 +155,10 @@ func Diff(s *State, d *Spec, now time.Time) *Plan {
 			p.DelAddrs = append(p.DelAddrs, a)
 			p.add("delete address %s", a)
 		}
+	}
+	if d.MTU != 0 && s.MTU != d.MTU {
+		p.SetMTU = d.MTU
+		p.add("mtu %d -> %d", s.MTU, d.MTU)
 	}
 	if !s.Up {
 		p.SetUp = true

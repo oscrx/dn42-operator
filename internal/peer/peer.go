@@ -29,6 +29,12 @@ const (
 	// in bird.conf (bird.conf must not define symbols starting with peer_).
 	ProtocolPrefix = "peer_"
 
+	// DefaultMTU is the WireGuard default (1500 minus 80 bytes of IPv6 +
+	// WireGuard overhead).
+	DefaultMTU = 1420
+	MinMTU     = 1280 // IPv6 minimum
+	MaxMTU     = 1500
+
 	MinListenPort = 20000
 	MaxListenPort = 29999
 )
@@ -64,6 +70,7 @@ type Peer struct {
 	Endpoint       *Endpoint // nil: no endpoint, we only answer
 	PublicKey      wgtypes.Key
 	LocalLinkLocal netip.Addr
+	MTU            int
 	Neighbor       netip.Addr
 	Link           dn42v1.LinkValues
 	// LinkSet is true when spec.link was given; otherwise Link holds the
@@ -167,6 +174,14 @@ func FromSpec(name string, s *dn42v1.DN42PeerSpec) (*Peer, *Error) {
 		return nil, invalid("publicKey: %v", err)
 	}
 	p.PublicKey = key
+
+	p.MTU = DefaultMTU
+	if s.MTU != nil {
+		if *s.MTU < MinMTU || *s.MTU > MaxMTU {
+			return nil, invalid("mtu %d is outside %d-%d", *s.MTU, MinMTU, MaxMTU)
+		}
+		p.MTU = int(*s.MTU)
+	}
 
 	p.LocalLinkLocal = DefaultLocalLinkLocal
 	if s.LocalLinkLocal != "" {

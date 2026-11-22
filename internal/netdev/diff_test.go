@@ -110,3 +110,19 @@ func TestDiffChanges(t *testing.T) {
 		t.Errorf("%+v", p)
 	}
 }
+
+func TestDiffMTU(t *testing.T) {
+	st, spec := setup(t)
+	st.MTU, spec.MTU = 1420, 1420
+	if p := Diff(st, spec, now); !p.Empty() {
+		t.Errorf("same mtu: %v", p.Description)
+	}
+	spec.MTU = 1380
+	if p := Diff(st, spec, now); p.SetMTU != 1380 || p.WireGuard != nil {
+		t.Errorf("mtu change: %+v", p)
+	}
+	spec.MTU = 0 // not managed
+	if p := Diff(st, spec, now); !p.Empty() {
+		t.Errorf("mtu 0: %v", p.Description)
+	}
+}

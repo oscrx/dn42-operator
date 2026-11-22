@@ -52,7 +52,7 @@ protocol device { scan time 1; }
 protocol static { ipv6; route fd42:4242:2::/48 unreachable; route fd42:4242:3::/48 unreachable; }
 protocol bgp op {
   local as 4242420002;
-  neighbor fe80::3818 as 4242423818;
+  neighbor fe80::2 as 4242423818;  # our side uses a fixed link-local, like zz
   interface "wg-remote";
   connect delay time 1;
   connect retry time 2;
@@ -148,7 +148,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "netns", "exec", "remote", "wg", "set", "wg-remote",
 		"private-key", filepath.Join(work, "remote.key"), "listen-port", "51820",
 		"peer", ourKey.PublicKey().String(), "allowed-ips", "fe80::/10,fd00::/8")
-	sh(t, "ip", "-n", "remote", "addr", "add", "fe80::2/64", "dev", "wg-remote")
+	sh(t, "ip", "-n", "remote", "addr", "add", "fe80::1/64", "dev", "wg-remote")
 	sh(t, "ip", "-n", "remote", "link", "set", "wg-remote", "up")
 
 	os.WriteFile(filepath.Join(work, "bird.conf"), []byte(fmt.Sprintf(ourBird, work)), 0o644)
@@ -168,9 +168,12 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	bc := &bird.Client{Socket: ourSock, Timeout: 10 * time.Second}
 	secret := keySecret(t)
 	secret.Data["autopeer"] = []byte(ourKey.String())
-	aa := mkPeer("aa", 4242420002, 0, "fe80::2", 0)
+	aa := mkPeer("aa", 4242420002, 0, "fe80::1", 0)
 	aa.Spec.Endpoint = "192.0.2.2:51820"
 	aa.Spec.PublicKey = remoteKey.PublicKey().String()
+	aa.Spec.LocalLinkLocal = "fe80::2"
+	mtu := int32(1380)
+	aa.Spec.MTU = &mtu
 	aa.Spec.Link = &dn42v1.LinkValues{Latency: 1, Bandwidth: 25, Crypto: 34}
 	nd := netdev.NewLinux()
 	h := newHarness(t, nd, &bird.Dir{Path: peersDir, Bird: bc}, bc, aa, secret, endpointService())
@@ -183,6 +186,9 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(peersDir, "aa.conf")); err != nil {
 		t.Fatal("aa.conf not written")
+	}
+	if st.MTU != 1380 || len(st.Addresses) != 1 || st.Addresses[0].String() != "fe80::2/64" {
+		t.Fatalf("wg-aa mtu %d addresses %v", st.MTU, st.Addresses)
 	}
 
 	waitFor(t, "handshake", 30*time.Second, func() bool {

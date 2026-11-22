@@ -141,6 +141,14 @@ spec:
                 maxLength: 39
                 pattern: ^[fF][eE][89aAbB][0-9a-fA-F]:[0-9a-fA-F:]*$
                 type: string
+              mtu:
+                description: |-
+                  MTU of the WireGuard link. Default 1420; lower it when the path to the
+                  peer has extra encapsulation (e.g. 1380 behind a 6in4 tunnel).
+                format: int32
+                maximum: 1500
+                minimum: 1280
+                type: integer
               neighbor:
                 description: Neighbor is the peer's link-local address, the BGP neighbor.
                 maxLength: 39

@@ -511,3 +511,29 @@ func TestLatencyProber(t *testing.T) {
 		t.Error("no retry after an hour")
 	}
 }
+
+func TestPerPeerMTUAndLinkLocal(t *testing.T) {
+	zz := mkPeer("zz", 4242421144, 21144, "fe80::1", 0)
+	zz.Spec.LocalLinkLocal = "fe80::2"
+	zz.Spec.KeyRef = "zz"
+	yuk := mkPeer("yukifia", 4242420091, 20091, "fe80::91", 1)
+	mtu := int32(1380)
+	yuk.Spec.MTU = &mtu
+	yuk.Spec.KeyRef = "yukifia"
+	u := newUnit(t, zz, yuk, keySecret(t, "zz", "yukifia"), endpointService())
+	u.mustPass()
+	z, y := u.nd.Links["wg-zz"], u.nd.Links["wg-yukifia"]
+	if z == nil || y == nil {
+		t.Fatalf("links: %v", u.managedLinks())
+	}
+	if z.Addresses[0].String() != "fe80::2/64" || z.MTU != 1420 {
+		t.Errorf("wg-zz: addr %v mtu %d", z.Addresses, z.MTU)
+	}
+	if y.Addresses[0].String() != "fe80::3818/64" || y.MTU != 1380 {
+		t.Errorf("wg-yukifia: addr %v mtu %d", y.Addresses, y.MTU)
+	}
+	b, _ := os.ReadFile(filepath.Join(u.path, "zz.conf"))
+	if !strings.Contains(string(b), "neighbor fe80::1 as 4242421144;") {
+		t.Errorf("zz.conf:\n%s", b)
+	}
+}

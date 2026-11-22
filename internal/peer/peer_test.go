@@ -195,3 +195,23 @@ func TestIsDN42ASN(t *testing.T) {
 		}
 	}
 }
+
+func TestMTUAndLocalLinkLocal(t *testing.T) {
+	s := iedon()
+	p, err := FromSpec("iedon", &s)
+	if err != nil || p.MTU != DefaultMTU || p.LocalLinkLocal != DefaultLocalLinkLocal {
+		t.Fatalf("defaults: %+v %v", p, err)
+	}
+	// zz assigns fixed link-locals: we are fe80::2, they are fe80::1.
+	s.LocalLinkLocal, s.Neighbor, s.MTU = "fe80::2", "fe80::1", i32(1380)
+	p, err = FromSpec("zz", &s)
+	if err != nil || p.MTU != 1380 || p.LocalLinkLocal.String() != "fe80::2" || p.Neighbor.String() != "fe80::1" {
+		t.Fatalf("zz: %+v %v", p, err)
+	}
+	for _, bad := range []int32{1279, 1501, 0} {
+		s.MTU = i32(bad)
+		if _, err := FromSpec("zz", &s); err == nil {
+			t.Errorf("mtu %d accepted", bad)
+		}
+	}
+}

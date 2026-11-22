@@ -65,6 +65,7 @@ func TestIntegrationLinkLifecycle(t *testing.T) {
 		Name: "wg-it", VRF: "vrf-dn42", PrivateKey: priv, ListenPort: 22189, PeerPublicKey: pub,
 		Endpoint: &net.UDPAddr{IP: net.ParseIP("2001:db8::1"), Port: 51820},
 		Address:  netip.MustParsePrefix("fe80::3818/64"),
+		MTU:      1420,
 	}
 	now := time.Now()
 	plan, err := m.Ensure(spec, now)
@@ -100,7 +101,8 @@ func TestIntegrationLinkLifecycle(t *testing.T) {
 		t.Errorf("second ensure changed: %v", plan.Description)
 	}
 
-	// Change port and address only.
+	// Change port, address and MTU only.
+	spec.MTU = 1380
 	spec.ListenPort = 22190
 	spec.Address = netip.MustParsePrefix("fe80::100/64")
 	plan, err = m.Ensure(spec, now)
@@ -109,7 +111,7 @@ func TestIntegrationLinkLifecycle(t *testing.T) {
 	}
 	t.Logf("update: %v", plan.Description)
 	st, _ = m.Inspect("wg-it")
-	if st.ListenPort != 22190 || len(st.Addresses) != 1 || st.Addresses[0] != spec.Address {
+	if st.ListenPort != 22190 || st.MTU != 1380 || len(st.Addresses) != 1 || st.Addresses[0] != spec.Address {
 		t.Errorf("after update: port %d addrs %v", st.ListenPort, st.Addresses)
 	}
 

@@ -325,6 +325,7 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 			ListenPort:    p.ListenPort,
 			PeerPublicKey: p.PublicKey,
 			Address:       netip.PrefixFrom(p.LocalLinkLocal, 64),
+			MTU:           p.MTU,
 		}
 		if p.Endpoint != nil && r.Resolve != nil {
 			addr, err := r.Resolve(ctx, p.Endpoint)

@@ -76,6 +76,11 @@ func (in *DN42PeerSpec) DeepCopyInto(out *DN42PeerSpec) {
 		*out = new(int32)
 		**out = **in
 	}
+	if in.MTU != nil {
+		in, out := &in.MTU, &out.MTU
+		*out = new(int32)
+		**out = **in
+	}
 	if in.Link != nil {
 		in, out := &in.Link, &out.Link
 		*out = new(LinkValues)

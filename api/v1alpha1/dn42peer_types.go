@@ -76,6 +76,13 @@ type DN42PeerSpec struct {
 	// +kubebuilder:validation:Pattern=`^[fF][eE][89aAbB][0-9a-fA-F]:[0-9a-fA-F:]*$`
 	Neighbor string `json:"neighbor"`
 
+	// MTU of the WireGuard link. Default 1420; lower it when the path to the
+	// peer has extra encapsulation (e.g. 1380 behind a 6in4 tunnel).
+	// +optional
+	// +kubebuilder:validation:Minimum=1280
+	// +kubebuilder:validation:Maximum=1500
+	MTU *int32 `json:"mtu,omitempty"`
+
 	// Link values for the BGP communities. Optional; without them the
 	// latency is measured (status.measuredLatency) and bandwidth and crypto
 	// use the operator's defaults.

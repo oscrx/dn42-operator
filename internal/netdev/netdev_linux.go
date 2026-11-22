@@ -67,6 +67,7 @@ func (l *Linux) inspect(ln netlink.Link) (*State, error) {
 		Name:    a.Name,
 		Alias:   a.Alias,
 		Up:      a.Flags&net.FlagUp != 0,
+		MTU:     a.MTU,
 		Sysctls: map[string]string{},
 	}
 	if a.MasterIndex != 0 {
@@ -234,6 +235,11 @@ func (l *Linux) apply(st *State, spec *Spec, plan *Plan) error {
 		}
 		if err := netlink.AddrAdd(ln, na); err != nil && !errors.Is(err, unix.EEXIST) {
 			return fmt.Errorf("add address %s to %s: %w", a, spec.Name, err)
+		}
+	}
+	if plan.SetMTU != 0 {
+		if err := netlink.LinkSetMTU(ln, plan.SetMTU); err != nil {
+			return fmt.Errorf("set mtu of %s: %w", spec.Name, err)
 		}
 	}
 	if plan.SetUp {

@@ -89,6 +89,9 @@ func (m *Manager) Ensure(spec *netdev.Spec, now time.Time) (*netdev.Plan, error)
 	}
 	s.Addresses = append(s.Addresses[:0], spec.Address)
 	s.Up = true
+	if spec.MTU != 0 {
+		s.MTU = spec.MTU
+	}
 	s.PrivateKey = spec.PrivateKey
 	s.ListenPort = spec.ListenPort
 	hs := time.Time{}
