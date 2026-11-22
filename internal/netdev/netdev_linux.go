@@ -103,14 +103,15 @@ func (l *Linux) inspect(ln netlink.Link) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	dev, err := c.Device(a.Name)
 	if err != nil {
 		return nil, fmt.Errorf("wireguard %s: %w", a.Name, err)
 	}
 	s.PrivateKey = dev.PrivateKey
 	s.ListenPort = dev.ListenPort
-	for _, p := range dev.Peers {
+	for i := range dev.Peers {
+		p := &dev.Peers[i]
 		s.Peers = append(s.Peers, WGPeer{
 			PublicKey:     p.PublicKey,
 			Endpoint:      p.Endpoint,
@@ -203,7 +204,7 @@ func (l *Linux) apply(st *State, spec *Spec, plan *Plan) error {
 			return err
 		}
 		err = c.ConfigureDevice(spec.Name, *plan.WireGuard)
-		c.Close()
+		_ = c.Close()
 		if err != nil {
 			return fmt.Errorf("configure wireguard %s: %w", spec.Name, err)
 		}

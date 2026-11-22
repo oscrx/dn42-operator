@@ -57,7 +57,7 @@ func run(configPath string, fakeRepo bool) error {
 	if fakeRepo {
 		repo = &autopeer.FakeRepo{Files: map[string][]byte{}}
 	} else {
-		gh, err := autopeer.NewGitHubApp(cfg.GitHub)
+		gh, err := autopeer.NewGitHubApp(&cfg.GitHub)
 		if err != nil {
 			return fmt.Errorf("github app: %w", err)
 		}

@@ -13,8 +13,10 @@ import (
 func TestLimiter(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	l := &Limiter{PerKey: 2, Total: 3, Now: func() time.Time { return now }}
-	if !l.Allow("a") || !l.Allow("a") || l.Allow("a") {
-		t.Error("per-key limit")
+	for i, want := range []bool{true, true, false} {
+		if got := l.Allow("a"); got != want {
+			t.Errorf("per-key limit, call %d: %v", i, got)
+		}
 	}
 	if !l.Allow("b") || l.Allow("c") {
 		t.Error("total limit")
@@ -52,13 +54,13 @@ func TestLoginRedirectPerHost(t *testing.T) {
 		"autopeer.oscrx.dn42": "https://autopeer.oscrx.dn42/auth/x/callback",
 		"evil.example":        a.srv.URL + "/auth/x/callback",
 	} {
-		req, _ := http.NewRequest("GET", a.srv.URL+"/login/x", nil)
+		req, _ := http.NewRequest(http.MethodGet, a.srv.URL+"/login/x", nil)
 		req.Host = host
 		resp, err := stop.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		u, _ := url.Parse(resp.Header.Get("Location"))
 		if got := u.Query().Get("redirect_uri"); got != want {
 			t.Errorf("host %s: redirect_uri %q, want %q", host, got, want)

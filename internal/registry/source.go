@@ -27,7 +27,7 @@ func LoadList(path string) (Set, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	out := Set{}
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {

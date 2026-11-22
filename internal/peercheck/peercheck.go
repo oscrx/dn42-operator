@@ -93,7 +93,7 @@ func (r *Result) errorf(file, format string, args ...any) {
 	r.Errors = append(r.Errors, Finding{File: file, Message: fmt.Sprintf(format, args...)})
 }
 
-var fileNameRe = regexp.MustCompile(`^([0-9]{1,10})-([a-z][a-z0-9]{0,11})\.yaml$`)
+var fileNameRe = regexp.MustCompile(`^(\d{1,10})-([a-z][a-z0-9]{0,11})\.yaml$`)
 
 // peerFile is the only shape a peer file may have: no status, no labels,
 // annotations or other metadata (an annotation could steer ArgoCD).
@@ -148,7 +148,8 @@ func countDocuments(b []byte) (int, error) {
 }
 
 // ParseFile checks one peer file on its own.
-func ParseFile(p string, f File, opt Options) (*Parsed, []string) {
+func ParseFile(p string, f File, o *Options) (result *Parsed, problems []string) {
+	opt := *o
 	opt.defaults()
 	var errs []string
 	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
@@ -221,7 +222,8 @@ func ParseFile(p string, f File, opt Options) (*Parsed, []string) {
 }
 
 // Check runs the whole gate.
-func Check(in Input, opt Options) *Result {
+func Check(in Input, o *Options) *Result {
+	opt := *o
 	opt.defaults()
 	res := &Result{}
 
@@ -239,7 +241,7 @@ func Check(in Input, opt Options) *Result {
 		if path.Base(p) == ".gitkeep" && path.Dir(p) == opt.PeersDir {
 			continue
 		}
-		pf, errs := ParseFile(p, in.Head[p], opt)
+		pf, errs := ParseFile(p, in.Head[p], &opt)
 		for _, e := range errs {
 			res.errorf(p, "%s", e)
 		}
@@ -286,11 +288,11 @@ func Check(in Input, opt Options) *Result {
 	if in.PR == nil {
 		return res
 	}
-	checkPR(in, opt, res)
+	checkPR(in, &opt, res)
 	return res
 }
 
-func checkPR(in Input, opt Options, res *Result) {
+func checkPR(in Input, opt *Options, res *Result) {
 	pr := in.PR
 	isApp := false
 	for _, l := range opt.AppLogins {

@@ -43,7 +43,7 @@ type LatencyProber struct {
 	attempts map[string]time.Time
 }
 
-// NeedLeaderElection: runs everywhere, measures only as leader.
+// NeedLeaderElection is false: runs everywhere, measures only as leader.
 func (p *LatencyProber) NeedLeaderElection() bool { return false }
 
 func (p *LatencyProber) defaults() {

@@ -94,7 +94,7 @@ func (p ICMP) Ping(ctx context.Context, addr netip.Addr, count int, interval tim
 	if err != nil {
 		return nil, fmt.Errorf("icmp socket: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	timeout := p.Timeout
 	if timeout == 0 {

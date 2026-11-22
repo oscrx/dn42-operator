@@ -66,7 +66,8 @@ func (l *PodLabeler) ClearOthers(ctx context.Context) error {
 		return fmt.Errorf("list leader pods: %w", err)
 	}
 	var errs []error
-	for _, p := range pods.Items {
+	for i := range pods.Items {
+		p := &pods.Items[i]
 		if p.Name == l.PodName {
 			continue
 		}

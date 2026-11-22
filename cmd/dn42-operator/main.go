@@ -65,7 +65,7 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	log := ctrl.Log.WithName("setup")
 
-	if err := run(runConfig{
+	if err := run(&runConfig{
 		namespace: *namespace, identity: *identity, leaseName: *leaseName,
 		keySecret: *keySecret, sharedKey: *sharedKey, vrf: *vrf,
 		birdSocket: *birdSocket, peersDir: *peersDir, birdConfig: *birdConfig, birdTemplate: *birdTemplate,
@@ -90,7 +90,7 @@ type runConfig struct {
 	podName, leaderLabel                                      string
 }
 
-func run(c runConfig) error {
+func run(c *runConfig) error {
 	if c.namespace == "" || c.identity == "" {
 		return errors.New("--namespace and --identity are required (or POD_NAMESPACE and NODE_NAME)")
 	}

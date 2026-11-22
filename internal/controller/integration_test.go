@@ -143,7 +143,9 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "-n", "remote", "addr", "add", "2001:db8:42::2/64", "dev", "veth-remote", "nodad")
 
 	ourKey, remoteKey := genKey(t), genKey(t)
-	os.WriteFile(filepath.Join(work, "remote.key"), []byte(remoteKey.String()), 0o600)
+	if err := os.WriteFile(filepath.Join(work, "remote.key"), []byte(remoteKey.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	sh(t, "ip", "-n", "remote", "link", "add", "wg-remote", "type", "wireguard")
 	sh(t, "ip", "netns", "exec", "remote", "wg", "set", "wg-remote",
 		"private-key", filepath.Join(work, "remote.key"), "listen-port", "51820",
@@ -151,8 +153,12 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "-n", "remote", "addr", "add", "fe80::1/64", "dev", "wg-remote")
 	sh(t, "ip", "-n", "remote", "link", "set", "wg-remote", "up")
 
-	os.WriteFile(filepath.Join(work, "bird.conf"), []byte(fmt.Sprintf(ourBird, work)), 0o644)
-	os.WriteFile(filepath.Join(work, "remote.conf"), []byte(fmt.Sprintf(remoteBird, work)), 0o644)
+	if err := os.WriteFile(filepath.Join(work, "bird.conf"), []byte(fmt.Sprintf(ourBird, work)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "remote.conf"), []byte(fmt.Sprintf(remoteBird, work)), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ourSock, remoteSock := filepath.Join(work, "bird.ctl"), filepath.Join(work, "remote.ctl")
 	startBird(t, "", filepath.Join(work, "bird.conf"), ourSock)
 	startBird(t, "remote", filepath.Join(work, "remote.conf"), remoteSock)

@@ -68,13 +68,13 @@ func fakeBird(t *testing.T, replies map[string]string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	sock := filepath.Join(dir, "b.ctl")
 	l, err := net.Listen("unix", sock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { l.Close() })
+	t.Cleanup(func() { _ = l.Close() })
 	go func() {
 		for {
 			c, err := l.Accept()
@@ -82,8 +82,8 @@ func fakeBird(t *testing.T, replies map[string]string) string {
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
-				c.Write([]byte("0001 BIRD 2.15 ready.\n"))
+				defer func() { _ = c.Close() }()
+				_, _ = c.Write([]byte("0001 BIRD 2.15 ready.\n"))
 				cmd, err := bufio.NewReader(c).ReadString('\n')
 				if err != nil {
 					return
@@ -92,7 +92,7 @@ func fakeBird(t *testing.T, replies map[string]string) string {
 				if !ok {
 					rep = "9001 Parse error\n"
 				}
-				c.Write([]byte(rep))
+				_, _ = c.Write([]byte(rep))
 			}(c)
 		}
 	}()
@@ -215,8 +215,12 @@ func TestDirSync(t *testing.T) {
 	d := &Dir{Path: path, Bird: ctl}
 	ctx := context.Background()
 	// A file that isn't ours stays.
-	os.WriteFile(filepath.Join(path, "README"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(path, "Not_A_Peer.conf"), []byte("x"), 0o644)
+	if err := os.WriteFile(filepath.Join(path, "README"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "Not_A_Peer.conf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	res, err := d.Sync(ctx, map[string]string{"a": "A1", "b": "B1"}, nil)
 	if err != nil || !res.Reloaded || len(res.Written) != 2 {
@@ -278,7 +282,9 @@ func TestDirSyncBaselineBroken(t *testing.T) {
 	path := t.TempDir()
 	ctl := &fakeCtl{dir: path}
 	d := &Dir{Path: path, Bird: ctl}
-	os.WriteFile(filepath.Join(path, "old.conf"), []byte("BAD"), 0o644)
+	if err := os.WriteFile(filepath.Join(path, "old.conf"), []byte("BAD"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	_, err := d.Sync(context.Background(), map[string]string{"new": "N"}, map[string]bool{"old": true})
 	if err == nil {
 		t.Fatal("expected an error")
@@ -295,25 +301,33 @@ func TestDirSyncBaselineBroken(t *testing.T) {
 func TestDirReconfiguresOnConfigChange(t *testing.T) {
 	path := t.TempDir()
 	conf := filepath.Join(t.TempDir(), "bird.conf")
-	os.WriteFile(conf, []byte("router id 1.2.3.4;\n"), 0o644)
+	if err := os.WriteFile(conf, []byte("router id 1.2.3.4;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ctl := &fakeCtl{dir: path}
 	d := &Dir{Path: path, Bird: ctl, ConfigFile: conf}
 	ctx := context.Background()
 	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil || ctl.configures != 1 {
 		t.Fatalf("first: %d %v", ctl.configures, err)
 	}
-	d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if ctl.configures != 1 {
 		t.Error("reconfigured without a change")
 	}
 	// bird.conf changes (ConfigMap update): checked, then configured.
-	os.WriteFile(conf, []byte("router id 1.2.3.5;\n"), 0o644)
+	if err := os.WriteFile(conf, []byte("router id 1.2.3.5;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	checks := ctl.checks
 	res, err := d.Sync(ctx, map[string]string{"a": "A"}, nil)
 	if err != nil || !res.Reloaded || !res.ConfigChanged || ctl.configures != 2 || ctl.checks == checks {
 		t.Errorf("after bird.conf change: reloaded=%v configures=%d err=%v", res.Reloaded, ctl.configures, err)
 	}
-	d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil {
+		t.Fatal(err)
+	}
 	if ctl.configures != 2 {
 		t.Error("reconfigured again without a change")
 	}

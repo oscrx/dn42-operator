@@ -214,7 +214,8 @@ func (r *Reconciler) teardownLocked(ctx context.Context) error {
 	if err != nil {
 		errs = append(errs, err)
 	}
-	for _, l := range links {
+	for i := range links {
+		l := &links[i]
 		if err := r.NetDev.Delete(l.Name); err != nil {
 			errs = append(errs, err)
 			continue
@@ -380,9 +381,9 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 		}
 	}
 	// Managed links that don't follow the wg-<name> scheme are orphans too.
-	for _, st := range managed {
-		if !strings.HasPrefix(st.Name, peer.InterfacePrefix) {
-			orphans = append(orphans, st.Name)
+	for i := range managed {
+		if !strings.HasPrefix(managed[i].Name, peer.InterfacePrefix) {
+			orphans = append(orphans, managed[i].Name)
 		}
 	}
 	sort.Strings(orphans)

@@ -2,7 +2,7 @@ package controller
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -50,10 +50,10 @@ func b2f(b bool) float64 {
 	return 0
 }
 
-func condTrue(conds []v1.Condition, t string) bool {
+func condTrue(conds []metav1.Condition, t string) bool {
 	for _, c := range conds {
 		if c.Type == t {
-			return c.Status == v1.ConditionTrue
+			return c.Status == metav1.ConditionTrue
 		}
 	}
 	return false

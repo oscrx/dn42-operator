@@ -8,6 +8,7 @@ package peer
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -32,10 +33,14 @@ const (
 	// DefaultMTU is the WireGuard default (1500 minus 80 bytes of IPv6 +
 	// WireGuard overhead).
 	DefaultMTU = 1420
-	MinMTU     = 1280 // IPv6 minimum
-	MaxMTU     = 1500
+	// MinMTU is the IPv6 minimum.
+	MinMTU = 1280
+	// MaxMTU is Ethernet's.
+	MaxMTU = 1500
 
+	// MinListenPort is the lowest tunnel port (the 2xxxx range).
 	MinListenPort = 20000
+	// MaxListenPort is the highest tunnel port.
 	MaxListenPort = 29999
 )
 
@@ -141,7 +146,11 @@ func FromObject(o *dn42v1.DN42Peer) (*Peer, *Error) {
 func FromSpec(name string, s *dn42v1.DN42PeerSpec) (*Peer, *Error) {
 	p := &Peer{Name: name}
 	if err := ValidateName(name); err != nil {
-		return nil, err.(*Error)
+		var ve *Error
+		if errors.As(err, &ve) {
+			return nil, ve
+		}
+		return nil, invalid("%v", err)
 	}
 	if !IsDN42ASN(s.ASN) {
 		return nil, invalid("asn %d is not in a DN42 range", s.ASN)
@@ -262,7 +271,7 @@ func ParseLinkLocal(s string) (netip.Addr, error) {
 func ParseEndpoint(s string) (*Endpoint, error) {
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
-		return nil, fmt.Errorf("%q: %v", s, err)
+		return nil, fmt.Errorf("%q: %w", s, err)
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil || port < 1 || port > 65535 {

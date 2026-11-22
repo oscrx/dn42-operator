@@ -18,7 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var autNumRe = regexp.MustCompile(`^AS([0-9]{1,10})$`)
+var autNumRe = regexp.MustCompile(`^AS(\d{1,10})$`)
 
 // Registry maps mntners to the ASNs they maintain, from a clone of the DN42
 // registry (data/aut-num/AS*, "mnt-by:" lines).
@@ -72,7 +72,7 @@ func readMntBy(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var out []string
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

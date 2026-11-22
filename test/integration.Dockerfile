@@ -4,7 +4,7 @@
 # Run privileged (it creates links and network namespaces):
 #   make integration
 ARG BIRD_IMAGE=dn42-bird:dev
-FROM golang:1.27-trixie AS go
+FROM docker.io/library/golang:1.27.4@sha256:205c7636d74e0ffbe3d007162df7d74f859f5a8c8322dfb9f907977686c126cf AS go
 FROM ${BIRD_IMAGE}
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends wireguard-tools ca-certificates gcc libc6-dev >/dev/null \

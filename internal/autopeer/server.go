@@ -74,7 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /peer/remove", s.removePeer)
 	mux.HandleFunc("GET /peer/edit", s.editPeerForm)
 	mux.HandleFunc("POST /peer/edit", s.editPeer)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
 
@@ -114,8 +114,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	sess := s.session(r)
 	if sess == nil {
 		var ps []providerLink
-		for _, p := range s.Cfg.Providers {
-			ps = append(ps, providerLink{p.Name, p.DisplayName})
+		for i := range s.Cfg.Providers {
+			ps = append(ps, providerLink{s.Cfg.Providers[i].Name, s.Cfg.Providers[i].DisplayName})
 		}
 		s.render(w, http.StatusOK, "login.html", map[string]any{"Providers": ps})
 		return
@@ -154,8 +154,8 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 	live := map[string]dn42v1.DN42Peer{}
 	if s.Status != nil {
 		if objs, err := s.Status.Peers(ctx); err == nil {
-			for _, o := range objs {
-				live[o.Name] = o
+			for i := range objs {
+				live[objs[i].Name] = objs[i]
 			}
 		}
 	}
@@ -168,11 +168,12 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 	}
 	var out []PeerView
 	inRepoPaths := map[string]bool{}
-	for _, p := range inRepo {
+	for i := range inRepo {
+		p := &inRepo[i]
 		if !id.May(p.Spec.ASN) {
 			continue
 		}
-		v := PeerView{Name: p.Name, ASN: p.Spec.ASN, File: PeerFileName(s.Cfg.GitHub.PeersDir, &p)}
+		v := PeerView{Name: p.Name, ASN: p.Spec.ASN, File: PeerFileName(s.Cfg.GitHub.PeersDir, p)}
 		inRepoPaths[v.File] = true
 		pd, isPending := pendingByPath[v.File]
 		v.PendingURL = pd.URL
@@ -334,8 +335,8 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	// Peers in open PRs count as taken: same name, port or neighbor can't
 	// be requested twice while one is in review.
 	known := map[string]bool{}
-	for _, e := range existing {
-		known[e.Name] = true
+	for i := range existing {
+		known[existing[i].Name] = true
 	}
 	for _, pd := range pending {
 		if pd.Peer != nil && !known[pd.Peer.Name] {
@@ -368,12 +369,12 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
-	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
+	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
 		Branch:  fmt.Sprintf("autopeer/%d-%s-%s", obj.Spec.ASN, obj.Name, randomString(4)),
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Add peer AS%d %s", obj.Spec.ASN, obj.Name),
-		Body: fmt.Sprintf("Submitted through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- Listen port: %d\n- File: `%s`\n",
+		Body: fmt.Sprintf("Submitted through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- Listen port: %d\n- File: %#q\n",
 			obj.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, *obj.Spec.ListenPort, path),
 	})
 	if err != nil {
@@ -388,13 +389,12 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 
 // ownAutopeer finds an autopeer of the login by name that has no open PR,
 // or writes the error page and returns nil.
-func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Session, name string) (*dn42v1.DN42Peer, string, []dn42v1.DN42Peer, []Pending) {
+func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Session, name string) (target *dn42v1.DN42Peer, path string, peers []dn42v1.DN42Peer, pending []Pending) {
 	peers, err := s.Repo.ListPeers(r.Context())
 	if err != nil {
 		s.fail(w, http.StatusServiceUnavailable, "Could not load the peers, please try later.")
 		return nil, "", nil, nil
 	}
-	var target *dn42v1.DN42Peer
 	for i := range peers {
 		if peers[i].Name == name {
 			target = &peers[i]
@@ -409,8 +409,8 @@ func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Sessi
 		s.fail(w, http.StatusForbidden, "This peering was set up by hand; ask AS"+strconv.FormatInt(s.Cfg.Router.ASN, 10)+" to change it.")
 		return nil, "", nil, nil
 	}
-	path := PeerFileName(s.Cfg.GitHub.PeersDir, target)
-	pending, err := s.Repo.PendingPeers(r.Context())
+	path = PeerFileName(s.Cfg.GitHub.PeersDir, target)
+	pending, err = s.Repo.PendingPeers(r.Context())
 	if err != nil {
 		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
 		return nil, "", nil, nil
@@ -452,12 +452,12 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
-	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
+	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
 		Branch: fmt.Sprintf("autopeer/remove-%d-%s-%s", target.Spec.ASN, target.Name, randomString(4)),
 		Path:   path,
 		Delete: true,
 		Title:  fmt.Sprintf("Remove peer AS%d %s", target.Spec.ASN, target.Name),
-		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: `%s`\n",
+		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
 			target.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
 	})
 	if err != nil {
@@ -526,12 +526,12 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
-	prURL, err := s.Repo.OpenPR(r.Context(), PullRequest{
+	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
 		Branch:  fmt.Sprintf("autopeer/edit-%d-%s-%s", obj.Spec.ASN, obj.Name, randomString(4)),
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Update peer AS%d %s", obj.Spec.ASN, obj.Name),
-		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: `%s`\n",
+		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
 			obj.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
 	})
 	if err != nil {

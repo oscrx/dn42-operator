@@ -25,7 +25,7 @@ type StatusLoop struct {
 	Interval time.Duration
 }
 
-// NeedLeaderElection: the loop runs everywhere and checks the role itself.
+// NeedLeaderElection is false: the loop runs everywhere and checks the role itself.
 func (s *StatusLoop) NeedLeaderElection() bool { return false }
 
 // Start runs the loop.
@@ -64,7 +64,8 @@ func (r *Reconciler) UpdateStatus(ctx context.Context) error {
 	resetPeerMetrics()
 
 	var firstErr error
-	for name, pr := range results {
+	for name := range results {
+		pr := results[name]
 		var obj dn42v1.DN42Peer
 		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: name}, &obj); err != nil {
 			continue // deleted since the pass

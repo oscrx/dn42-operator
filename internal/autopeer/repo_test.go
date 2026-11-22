@@ -45,7 +45,7 @@ func (g *fakeGitHub) handler() http.Handler {
 				http.Error(w, "bad jwt", http.StatusUnauthorized)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"token": "inst-tok", "expires_at": time.Now().Add(time.Hour)})
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "inst-tok", "expires_at": time.Now().Add(time.Hour)})
 			return
 		}
 		if auth != "token inst-tok" {
@@ -55,29 +55,29 @@ func (g *fakeGitHub) handler() http.Handler {
 		const base = "/repos/oscrx/dn42-peers"
 		p := strings.TrimPrefix(r.URL.Path, base)
 		switch {
-		case r.Method == "GET" && p == "/contents/peers":
+		case r.Method == http.MethodGet && p == "/contents/peers":
 			var out []map[string]string
 			for path := range g.files {
 				name := path[strings.LastIndex(path, "/")+1:]
 				out = append(out, map[string]string{"type": "file", "name": name, "path": path})
 			}
-			json.NewEncoder(w).Encode(out)
-		case r.Method == "GET" && strings.HasPrefix(p, "/contents/peers/") && strings.HasPrefix(r.URL.Query().Get("ref"), "head-"):
+			_ = json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodGet && strings.HasPrefix(p, "/contents/peers/") && strings.HasPrefix(r.URL.Query().Get("ref"), "head-"):
 			// A PR head: "head-<branch>".
 			c, ok := g.added[strings.TrimPrefix(r.URL.Query().Get("ref"), "head-")+"/"+strings.TrimPrefix(p, "/contents/")]
 			if !ok {
 				http.NotFound(w, r)
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": base64.StdEncoding.EncodeToString([]byte(c))})
-		case r.Method == "GET" && p == "/pulls":
+			_ = json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": base64.StdEncoding.EncodeToString([]byte(c))})
+		case r.Method == http.MethodGet && p == "/pulls":
 			var out []map[string]any
 			for i, pl := range g.pulls {
 				out = append(out, map[string]any{"number": i + 1, "html_url": "https://github.com/oscrx/dn42-peers/pull/" + strconv.Itoa(i+1),
 					"head": map[string]string{"sha": "head-" + pl["head"]}})
 			}
-			json.NewEncoder(w).Encode(out)
-		case r.Method == "GET" && strings.HasPrefix(p, "/pulls/") && strings.HasSuffix(p, "/files"):
+			_ = json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodGet && strings.HasPrefix(p, "/pulls/") && strings.HasSuffix(p, "/files"):
 			n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(p, "/pulls/"), "/files"))
 			branch := g.pulls[n-1]["head"]
 			var out []map[string]string
@@ -91,18 +91,18 @@ func (g *fakeGitHub) handler() http.Handler {
 					out = append(out, map[string]string{"filename": path, "status": "removed"})
 				}
 			}
-			json.NewEncoder(w).Encode(out)
-		case r.Method == "DELETE" && strings.HasPrefix(p, "/contents/"):
+			_ = json.NewEncoder(w).Encode(out)
+		case r.Method == http.MethodDelete && strings.HasPrefix(p, "/contents/"):
 			var in map[string]string
-			json.NewDecoder(r.Body).Decode(&in)
+			_ = json.NewDecoder(r.Body).Decode(&in)
 			path := strings.TrimPrefix(p, "/contents/")
 			if in["sha"] != "blob-"+path {
-				http.Error(w, "sha mismatch", 409)
+				http.Error(w, "sha mismatch", http.StatusConflict)
 				return
 			}
 			g.deleted[in["branch"]+"/"+path] = true
-			w.Write([]byte("{}"))
-		case r.Method == "GET" && strings.HasPrefix(p, "/contents/peers/"):
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodGet && strings.HasPrefix(p, "/contents/peers/"):
 			c, ok := g.files[strings.TrimPrefix(p, "/contents/")]
 			if !ok {
 				http.NotFound(w, r)
@@ -114,42 +114,42 @@ func (g *fakeGitHub) handler() http.Handler {
 			for i := 0; i < len(enc); i += 60 {
 				wrapped.WriteString(enc[i:min(i+60, len(enc))] + "\n")
 			}
-			json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": wrapped.String(), "sha": "blob-" + strings.TrimPrefix(p, "/contents/")})
-		case r.Method == "GET" && p == "/git/ref/heads/main":
-			json.NewEncoder(w).Encode(map[string]any{"object": map[string]string{"sha": "abc123"}})
-		case r.Method == "POST" && p == "/git/refs":
+			_ = json.NewEncoder(w).Encode(map[string]string{"type": "file", "content": wrapped.String(), "sha": "blob-" + strings.TrimPrefix(p, "/contents/")})
+		case r.Method == http.MethodGet && p == "/git/ref/heads/main":
+			_ = json.NewEncoder(w).Encode(map[string]any{"object": map[string]string{"sha": "abc123"}})
+		case r.Method == http.MethodPost && p == "/git/refs":
 			var in map[string]string
-			json.NewDecoder(r.Body).Decode(&in)
+			_ = json.NewDecoder(r.Body).Decode(&in)
 			if in["sha"] != "abc123" {
-				http.Error(w, "bad sha", 422)
+				http.Error(w, "bad sha", http.StatusUnprocessableEntity)
 				return
 			}
 			g.refs[in["ref"]] = in["sha"]
-			w.WriteHeader(201)
-			w.Write([]byte("{}"))
-		case r.Method == "PUT" && strings.HasPrefix(p, "/contents/"):
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPut && strings.HasPrefix(p, "/contents/"):
 			var in map[string]string
-			json.NewDecoder(r.Body).Decode(&in)
+			_ = json.NewDecoder(r.Body).Decode(&in)
 			b, _ := base64.StdEncoding.DecodeString(in["content"])
 			if _, ok := g.refs["refs/heads/"+in["branch"]]; !ok {
-				http.Error(w, "no branch", 422)
+				http.Error(w, "no branch", http.StatusUnprocessableEntity)
 				return
 			}
 			// Like GitHub: updating an existing file needs its sha.
 			path := strings.TrimPrefix(p, "/contents/")
 			if _, exists := g.files[path]; exists && in["sha"] != "blob-"+path {
-				http.Error(w, "sha wasn't supplied", 422)
+				http.Error(w, "sha wasn't supplied", http.StatusUnprocessableEntity)
 				return
 			}
 			g.added[in["branch"]+"/"+strings.TrimPrefix(p, "/contents/")] = string(b)
-			w.WriteHeader(201)
-			w.Write([]byte("{}"))
-		case r.Method == "POST" && p == "/pulls":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte("{}"))
+		case r.Method == http.MethodPost && p == "/pulls":
 			var in map[string]string
-			json.NewDecoder(r.Body).Decode(&in)
+			_ = json.NewDecoder(r.Body).Decode(&in)
 			g.pulls = append(g.pulls, in)
-			w.WriteHeader(201)
-			json.NewEncoder(w).Encode(map[string]string{"html_url": "https://github.com/oscrx/dn42-peers/pull/9"})
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(map[string]string{"html_url": "https://github.com/oscrx/dn42-peers/pull/9"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -175,7 +175,7 @@ func (g *fakeGitHub) checkJWT(tok string) bool {
 		Exp int64  `json:"exp"`
 		Iat int64  `json:"iat"`
 	}
-	json.Unmarshal(b, &c)
+	_ = json.Unmarshal(b, &c)
 	now := time.Now().Unix()
 	return c.Iss == "1234" && c.Iat <= now && c.Exp > now && c.Exp-c.Iat <= 600
 }
@@ -199,7 +199,7 @@ func TestGitHubApp(t *testing.T) {
 	if err != nil || len(peers) != 1 || peers[0].Name != "old" || *peers[0].Spec.ListenPort != 20001 {
 		t.Fatalf("list: %v %v", peers, err)
 	}
-	url, err := gh.OpenPR(t.Context(), PullRequest{Branch: "autopeer/x", Path: "peers/4242420002-new.yaml",
+	url, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/x", Path: "peers/4242420002-new.yaml",
 		Content: []byte("hello"), Title: "Add peer", Body: "body"})
 	if err != nil || url != "https://github.com/oscrx/dn42-peers/pull/9" {
 		t.Fatalf("pr: %s %v", url, err)
@@ -218,14 +218,14 @@ func TestGitHubApp(t *testing.T) {
 		t.Fatalf("pending: %+v %v", pend, err)
 	}
 	// A removal PR: branch, delete with the blob sha, PR.
-	if _, err := gh.OpenPR(t.Context(), PullRequest{Branch: "autopeer/rm", Path: "peers/4242420001-old.yaml", Delete: true, Title: "Remove"}); err != nil {
+	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/rm", Path: "peers/4242420001-old.yaml", Delete: true, Title: "Remove"}); err != nil {
 		t.Fatal(err)
 	}
 	if !fg.deleted["autopeer/rm/peers/4242420001-old.yaml"] {
 		t.Errorf("deleted: %v", fg.deleted)
 	}
 	// Updating an existing file sends its sha.
-	if _, err := gh.OpenPR(t.Context(), PullRequest{Branch: "autopeer/edit", Path: "peers/4242420001-old.yaml", Content: []byte("v2"), Title: "Update"}); err != nil {
+	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/edit", Path: "peers/4242420001-old.yaml", Content: []byte("v2"), Title: "Update"}); err != nil {
 		t.Fatal(err)
 	}
 	if fg.added["autopeer/edit/peers/4242420001-old.yaml"] != "v2" {

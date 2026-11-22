@@ -15,7 +15,7 @@ func git(repo string, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
 }
@@ -51,7 +51,8 @@ func readTree(repo, rev, dir string) (map[string]File, error) {
 // FromGit builds the input from a repository: the tree at head, and when
 // base is set, the PR diff base...head (merge base) with the base versions of
 // the touched peer files.
-func FromGit(repo, base, head, author string, opt Options) (Input, error) {
+func FromGit(repo, base, head, author string, o *Options) (Input, error) {
+	opt := *o
 	opt.defaults()
 	if head == "" {
 		head = "HEAD"
@@ -96,7 +97,8 @@ func FromGit(repo, base, head, author string, opt Options) (Input, error) {
 }
 
 // FromDir reads the peers dir from disk (local runs before committing).
-func FromDir(dir string, opt Options) (Input, error) {
+func FromDir(dir string, o *Options) (Input, error) {
+	opt := *o
 	opt.defaults()
 	in := Input{Head: map[string]File{}}
 	root := filepath.Join(dir, filepath.FromSlash(opt.PeersDir))

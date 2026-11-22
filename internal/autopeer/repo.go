@@ -52,7 +52,7 @@ type PeerRepo interface {
 	// ListPeers returns the DN42Peer files on the base branch.
 	ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error)
 	// OpenPR creates a branch with the change and opens a PR; returns its URL.
-	OpenPR(ctx context.Context, pr PullRequest) (string, error)
+	OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 	// PendingPeers lists the peer files touched by open PRs, so a second
 	// request can't take a name, port or neighbor that is still in review.
 	PendingPeers(ctx context.Context) ([]Pending, error)
@@ -101,15 +101,15 @@ func (f *FakeRepo) ListPeers(context.Context) ([]dn42v1.DN42Peer, error) {
 }
 
 // OpenPR records the PR.
-func (f *FakeRepo) OpenPR(_ context.Context, pr PullRequest) (string, error) {
+func (f *FakeRepo) OpenPR(_ context.Context, pr *PullRequest) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	for _, p := range f.PRs {
-		if p.Branch == pr.Branch {
+	for i := range f.PRs {
+		if f.PRs[i].Branch == pr.Branch {
 			return "", fmt.Errorf("branch %s exists", pr.Branch)
 		}
 	}
-	f.PRs = append(f.PRs, pr)
+	f.PRs = append(f.PRs, *pr)
 	return fmt.Sprintf("https://github.com/example/peers/pull/%d", len(f.PRs)), nil
 }
 
@@ -144,7 +144,7 @@ type GitHubApp struct {
 }
 
 // NewGitHubApp loads the App's private key.
-func NewGitHubApp(cfg GitHubConfig) (*GitHubApp, error) {
+func NewGitHubApp(cfg *GitHubConfig) (*GitHubApp, error) {
 	b, err := os.ReadFile(cfg.PrivateKeyFile)
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func NewGitHubApp(cfg GitHubConfig) (*GitHubApp, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &GitHubApp{Cfg: cfg, Key: key, HTTPClient: &http.Client{Timeout: 20 * time.Second}}, nil
+	return &GitHubApp{Cfg: *cfg, Key: key, HTTPClient: &http.Client{Timeout: 20 * time.Second}}, nil
 }
 
 // ParseRSAKey parses a PEM RSA key (PKCS#1, as GitHub issues them, or PKCS#8).
@@ -253,7 +253,7 @@ func (g *GitHubApp) do(ctx context.Context, auth, method, p string, in, out any)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode/100 != 2 {
 		return &HTTPError{Status: resp.StatusCode, Body: strings.TrimSpace(string(b))}
@@ -318,8 +318,8 @@ func (g *GitHubApp) ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
 	return out, nil
 }
 
-// OpenPR: branch from the base head, add the file, open the PR.
-func (g *GitHubApp) OpenPR(ctx context.Context, pr PullRequest) (string, error) {
+// OpenPR branches from the base head, changes the file and opens the PR.
+func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error) {
 	var ref struct {
 		Object struct {
 			SHA string `json:"sha"`

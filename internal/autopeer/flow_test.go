@@ -48,14 +48,14 @@ func newFakeIdP(t *testing.T, claims map[string]any) *fakeIdP {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
 		u := f.srv.URL
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer": u, "authorization_endpoint": u + "/authorize", "token_endpoint": u + "/token",
 			"jwks_uri": u + "/jwks", "userinfo_endpoint": u + "/userinfo",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
+		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}})
 	})
 	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -70,7 +70,7 @@ func newFakeIdP(t *testing.T, claims map[string]any) *fakeIdP {
 		http.Redirect(w, r, q.Get("redirect_uri")+"?code="+code+"&state="+url.QueryEscape(q.Get("state")), http.StatusFound)
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
-		r.ParseForm()
+		_ = r.ParseForm()
 		f.mu.Lock()
 		f.tokenCalls++
 		ar, ok := f.codes[r.PostForm.Get("code")]
@@ -79,7 +79,7 @@ func newFakeIdP(t *testing.T, claims map[string]any) *fakeIdP {
 		sum := sha256.Sum256([]byte(r.PostForm.Get("code_verifier")))
 		if !ok || base64.RawURLEncoding.EncodeToString(sum[:]) != ar.challenge || r.PostForm.Get("redirect_uri") != ar.redirect {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
 			return
 		}
 		idc := map[string]any{"iss": f.srv.URL, "aud": ar.clientID, "sub": "user-1", "nonce": ar.nonce,
@@ -88,7 +88,7 @@ func newFakeIdP(t *testing.T, claims map[string]any) *fakeIdP {
 			idc[k] = v
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"access_token": "at-1", "token_type": "Bearer", "expires_in": 3600, "id_token": f.sign(idc)})
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at-1", "token_type": "Bearer", "expires_in": 3600, "id_token": f.sign(idc)})
 	})
 	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer at-1" {
@@ -100,7 +100,7 @@ func newFakeIdP(t *testing.T, claims map[string]any) *fakeIdP {
 			ui[k] = v
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(ui)
+		_ = json.NewEncoder(w).Encode(ui)
 	})
 	f.srv = httptest.NewServer(mux)
 	t.Cleanup(f.srv.Close)
@@ -156,7 +156,7 @@ func (a *app) get(path string) (int, string) {
 	if err != nil {
 		a.t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
@@ -167,7 +167,7 @@ func (a *app) post(path string, form url.Values) (int, string) {
 	if err != nil {
 		a.t.Fatal(err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }
@@ -249,7 +249,7 @@ func TestOIDCRejects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	authURL, _ := url.Parse(resp.Header.Get("Location"))
 	if authURL.Query().Get("code_challenge_method") != "S256" || authURL.Query().Get("nonce") == "" {
 		t.Errorf("auth URL lacks PKCE or nonce: %s", authURL)
@@ -259,9 +259,9 @@ func TestOIDCRejects(t *testing.T) {
 	}
 	// Replaying a callback fails: the flow cookie is single-use.
 	resp, _ = stop.Get(a.srv.URL + "/login/x")
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	resp, _ = stop.Get(resp.Header.Get("Location")) // IdP -> redirect to callback with code
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	cb := resp.Header.Get("Location")
 	if code, _ := a.get(strings.TrimPrefix(cb, a.srv.URL)); code != 200 {
 		t.Fatalf("first redemption: %d", code)
@@ -314,7 +314,7 @@ func codeFor(t *testing.T, p *Provider, f *Flow) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	loc, _ := url.Parse(resp.Header.Get("Location"))
 	return loc.Query().Get("code")
 }

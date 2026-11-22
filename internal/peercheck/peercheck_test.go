@@ -29,7 +29,7 @@ func readDir(t *testing.T, dir string) map[string]File {
 	if _, err := os.Stat(dir); err != nil {
 		return out
 	}
-	filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -80,7 +80,7 @@ func TestCases(t *testing.T) {
 				}
 				in.PR = pr
 			}
-			res := Check(in, Options{AppLogins: []string{app}, Registry: fakeRegistry(t)})
+			res := Check(in, &Options{AppLogins: []string{app}, Registry: fakeRegistry(t)})
 			if res.OK() != c.OK {
 				t.Errorf("ok = %v, want %v; errors: %v", res.OK(), c.OK, res.Errors)
 			}
@@ -103,10 +103,10 @@ func TestCases(t *testing.T) {
 
 func TestRegistryRequired(t *testing.T) {
 	head := readDir(t, "testdata/cases/tree-ok/head")
-	if res := Check(Input{Head: head}, Options{}); res.OK() {
+	if res := Check(Input{Head: head}, &Options{}); res.OK() {
 		t.Error("passed without a registry")
 	}
-	if res := Check(Input{Head: head}, Options{SkipRegistry: true}); !res.OK() {
+	if res := Check(Input{Head: head}, &Options{SkipRegistry: true}); !res.OK() {
 		t.Errorf("skip-registry: %v", res.Errors)
 	}
 }
@@ -116,7 +116,7 @@ func TestSymlinkRejected(t *testing.T) {
 	f := head["peers/4242420253-moe.yaml"]
 	f.Mode = "120000"
 	head["peers/4242420253-moe.yaml"] = f
-	if res := Check(Input{Head: head}, Options{SkipRegistry: true}); res.OK() {
+	if res := Check(Input{Head: head}, &Options{SkipRegistry: true}); res.OK() {
 		t.Error("symlink accepted")
 	}
 }
@@ -132,7 +132,9 @@ func gitRun(t *testing.T, dir string, args ...string) {
 func copyTree(t *testing.T, from, to string) {
 	for p, f := range readDir(t, from) {
 		dst := filepath.Join(to, p)
-		os.MkdirAll(filepath.Dir(dst), 0o755)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(dst, f.Content, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -148,17 +150,21 @@ func TestFromGit(t *testing.T) {
 	dir := t.TempDir()
 	gitRun(t, dir, "init", "-q", "-b", "main")
 	copyTree(t, "testdata/cases/tree-ok/head", dir)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, dir, "add", "-A")
 	gitRun(t, dir, "commit", "-q", "-m", "base")
 	gitRun(t, dir, "checkout", "-q", "-b", "pr")
 	copyTree(t, "testdata/cases/app-add-ok/head", dir)
-	os.WriteFile(filepath.Join(dir, "peers", "untracked.txt"), []byte("ignored: not committed"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "peers", "untracked.txt"), []byte("ignored: not committed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, dir, "add", "peers/4242420010-kio.yaml")
 	gitRun(t, dir, "commit", "-q", "-m", "add kio")
 
 	opt := Options{AppLogins: []string{app}, Registry: fakeRegistry(t)}
-	in, err := FromGit(dir, "main", "HEAD", app, opt)
+	in, err := FromGit(dir, "main", "HEAD", app, &opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +174,7 @@ func TestFromGit(t *testing.T) {
 	if len(in.Head) != 3 {
 		t.Errorf("head tree: %d files (untracked must not count)", len(in.Head))
 	}
-	res := Check(in, opt)
+	res := Check(in, &opt)
 	if !res.OK() || !res.AutoMergeable {
 		t.Errorf("%+v", res)
 	}
@@ -176,7 +182,7 @@ func TestFromGit(t *testing.T) {
 	// A second commit renaming moe: delete + add, two files, no auto-merge.
 	gitRun(t, dir, "mv", "peers/4242420253-moe.yaml", "peers/4242420253-moe2.yaml")
 	gitRun(t, dir, "commit", "-q", "-m", "rename")
-	in, err = FromGit(dir, "main", "HEAD", app, opt)
+	in, err = FromGit(dir, "main", "HEAD", app, &opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,17 +192,17 @@ func TestFromGit(t *testing.T) {
 	if _, ok := in.PR.Base["peers/4242420253-moe.yaml"]; !ok {
 		t.Error("base version of the renamed file missing")
 	}
-	res = Check(in, opt)
+	res = Check(in, &opt)
 	if res.OK() || res.AutoMergeable { // name moe2 doesn't match metadata.name moe
 		t.Errorf("rename: %+v", res)
 	}
 
 	// Tree mode on main.
-	in, err = FromGit(dir, "", "main", "", opt)
+	in, err = FromGit(dir, "", "main", "", &opt)
 	if err != nil || in.PR != nil {
 		t.Fatal(err)
 	}
-	if res := Check(in, opt); !res.OK() || res.Peers != 2 {
+	if res := Check(in, &opt); !res.OK() || res.Peers != 2 {
 		t.Errorf("main: %+v", res)
 	}
 }

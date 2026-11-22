@@ -76,7 +76,7 @@ func (c *Client) Command(ctx context.Context, cmd string) (*Reply, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bird: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}

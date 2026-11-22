@@ -156,9 +156,10 @@ func (p *Provider) userinfo(ctx context.Context, tok *oauth2.Token) (map[string]
 		if err != nil {
 			return nil, fmt.Errorf("userinfo: %w", err)
 		}
-		return out, ui.Claims(&out)
+		err = ui.Claims(&out)
+		return out, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Config.UserinfoURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.Config.UserinfoURL, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +169,7 @@ func (p *Provider) userinfo(ctx context.Context, tok *oauth2.Token) (map[string]
 	if err != nil {
 		return nil, fmt.Errorf("userinfo: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err

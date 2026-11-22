@@ -34,6 +34,7 @@ func (m *Manager) AddForeign(name string) {
 	m.Links[name] = &netdev.State{Name: name, Sysctls: map[string]string{}}
 }
 
+// ListManaged returns the links with the managed alias.
 func (m *Manager) ListManaged() ([]netdev.State, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -50,6 +51,7 @@ func (m *Manager) ListManaged() ([]netdev.State, error) {
 	return out, nil
 }
 
+// Inspect returns a copy of a link, nil if missing.
 func (m *Manager) Inspect(name string) (*netdev.State, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -64,6 +66,7 @@ func (m *Manager) Inspect(name string) (*netdev.State, error) {
 	return &c, nil
 }
 
+// Ensure applies netdev.Diff to the in-memory link.
 func (m *Manager) Ensure(spec *netdev.Spec, now time.Time) (*netdev.Plan, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -103,6 +106,7 @@ func (m *Manager) Ensure(spec *netdev.Spec, now time.Time) (*netdev.Plan, error)
 	return p, nil
 }
 
+// Delete removes a managed link; foreign links are refused.
 func (m *Manager) Delete(name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

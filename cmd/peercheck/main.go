@@ -75,15 +75,15 @@ func run() int {
 		if *base != "" {
 			return fail("--worktree is a tree check; it can't be combined with --base")
 		}
-		in, err = peercheck.FromDir(*repo, opt)
+		in, err = peercheck.FromDir(*repo, &opt)
 	} else {
-		in, err = peercheck.FromGit(*repo, *base, *head, *author, opt)
+		in, err = peercheck.FromGit(*repo, *base, *head, *author, &opt)
 	}
 	if err != nil {
 		return fail("%v", err)
 	}
 
-	res := peercheck.Check(in, opt)
+	res := peercheck.Check(in, &opt)
 	gha := os.Getenv("GITHUB_ACTIONS") == "true"
 	for _, f := range res.Errors {
 		fmt.Println("ERROR", f)
@@ -110,8 +110,13 @@ func run() int {
 			if err != nil {
 				return fail("%v", err)
 			}
-			fmt.Fprintf(f, "auto-mergeable=%v\n", res.AutoMergeable)
-			f.Close()
+			_, werr := fmt.Fprintf(f, "auto-mergeable=%v\n", res.AutoMergeable)
+			if cerr := f.Close(); werr == nil {
+				werr = cerr
+			}
+			if werr != nil {
+				return fail("write %s: %v", out, werr)
+			}
 		}
 	}
 	if !res.OK() {

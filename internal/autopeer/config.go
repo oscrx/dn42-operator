@@ -197,16 +197,16 @@ func (c *Config) complete() error {
 		return fmt.Errorf("router.name %q must match ^[a-z][a-z0-9]{0,11}$", c.Router.Name)
 	}
 	if _, err := peer.ParseKey(c.Router.PublicKey); err != nil {
-		return fmt.Errorf("router.publicKey: %v", err)
+		return fmt.Errorf("router.publicKey: %w", err)
 	}
 	if c.Router.LinkLocal == "" {
 		c.Router.LinkLocal = peer.DefaultLocalLinkLocal.String()
 	}
 	if _, err := peer.ParseLinkLocal(c.Router.LinkLocal); err != nil {
-		return fmt.Errorf("router.linkLocal: %v", err)
+		return fmt.Errorf("router.linkLocal: %w", err)
 	}
 	if _, err := peer.ParseEndpoint(joinHostPort(c.Router.EndpointHost, 1)); err != nil {
-		return fmt.Errorf("router.endpointHost: %v", err)
+		return fmt.Errorf("router.endpointHost: %w", err)
 	}
 	if len(c.Providers) == 0 {
 		return fmt.Errorf("no providers")

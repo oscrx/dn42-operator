@@ -177,7 +177,3 @@ type DN42PeerList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []DN42Peer `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&DN42Peer{}, &DN42PeerList{})
-}

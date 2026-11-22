@@ -228,9 +228,9 @@ func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, ot
 		return nil, nil, &FieldError{"neighbor", fmt.Sprintf("%s is our address; pick another link-local address", pp.Neighbor)}
 	}
 	var all []dn42v1.DN42Peer
-	for _, o := range others {
-		if o.Name != cur.Name {
-			all = append(all, o)
+	for i := range others {
+		if others[i].Name != cur.Name {
+			all = append(all, others[i])
 		}
 	}
 	all = append(all, *obj)

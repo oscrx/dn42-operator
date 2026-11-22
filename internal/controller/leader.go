@@ -15,7 +15,7 @@ import (
 type Role int32
 
 const (
-	// RoleUnknown: just started, the lease hasn't been seen yet. Nothing is
+	// RoleUnknown means just started: the lease hasn't been seen yet. Nothing is
 	// built or removed, so a restarted leader doesn't tear down its own
 	// tunnels before it renews the lease.
 	RoleUnknown Role = iota
@@ -23,7 +23,7 @@ const (
 	RoleLeader
 	// RoleFollower removes all managed links and peer configs.
 	RoleFollower
-	// RoleStopping: shutting down, already torn down. Nothing is changed.
+	// RoleStopping means shutting down, already torn down. Nothing is changed.
 	RoleStopping
 )
 

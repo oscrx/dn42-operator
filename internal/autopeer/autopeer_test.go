@@ -1,6 +1,7 @@
 package autopeer
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -49,7 +50,9 @@ func testRegistry(t *testing.T) *registry.Registry {
 		"README":       "mnt-by: FOO-MNT\n",
 	}
 	for n, c := range files {
-		os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644)
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r := &registry.Registry{Path: filepath.Dir(filepath.Dir(dir))}
 	if err := r.Load(); err != nil {
@@ -126,20 +129,20 @@ func TestCookies(t *testing.T) {
 	if !ck.HttpOnly || !ck.Secure || ck.SameSite != http.SameSiteLaxMode {
 		t.Errorf("cookie flags: %+v", ck)
 	}
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(ck)
 	var v map[string]int
 	if err := c.Get(req, "a", &v); err != nil || v["x"] != 1 {
 		t.Fatalf("%v %v", v, err)
 	}
 	// Same value under another name: refused.
-	req = httptest.NewRequest("GET", "/", nil)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "b", Value: ck.Value})
 	if err := c.Get(req, "b", &v); err == nil {
 		t.Error("cookie moved to another name accepted")
 	}
 	// Tampered.
-	req = httptest.NewRequest("GET", "/", nil)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	bad := []byte(ck.Value)
 	bad[len(bad)/2] ^= 1
 	req.AddCookie(&http.Cookie{Name: "a", Value: string(bad)})
@@ -148,8 +151,8 @@ func TestCookies(t *testing.T) {
 	}
 	// Expired.
 	rec = httptest.NewRecorder()
-	c.Set(rec, "a", 1, -time.Second)
-	req = httptest.NewRequest("GET", "/", nil)
+	_ = c.Set(rec, "a", 1, -time.Second)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	req.AddCookie(&http.Cookie{Name: "a", Value: rec.Result().Cookies()[0].Value})
 	if err := c.Get(req, "a", &v); err == nil {
 		t.Error("expired cookie accepted")
@@ -213,8 +216,8 @@ func TestBuildPeer(t *testing.T) {
 		r := req
 		b.mod(&r)
 		_, _, err := BuildPeer(cfg, id, r, b.ex)
-		fe, ok := err.(*FieldError)
-		if !ok || fe.Field != b.field {
+		var fe *FieldError
+		if !errors.As(err, &fe) || fe.Field != b.field {
 			t.Errorf("%d: want field %s, got %v", i, b.field, err)
 		}
 	}
@@ -307,10 +310,14 @@ func TestExampleConfigParses(t *testing.T) {
 	s := strings.ReplaceAll(string(b), "REPLACE_WITH_SHARED_AUTOPEER_PUBLIC_KEY=", ourPub)
 	s = strings.ReplaceAll(s, "/secrets/", dir+"/")
 	for _, f := range []string{"kioubit-client-secret", "iedon-client-secret"} {
-		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600)
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	p := filepath.Join(dir, "c.yaml")
-	os.WriteFile(p, []byte(s), 0o600)
+	if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	c, err := LoadConfig(p)
 	if err != nil {
 		t.Fatal(err)

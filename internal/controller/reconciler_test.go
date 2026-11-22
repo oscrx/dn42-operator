@@ -501,7 +501,7 @@ func TestLatencyProber(t *testing.T) {
 	}
 	calls := pinger.calls
 	now = now.Add(30 * time.Minute)
-	lp.Run(context.Background())
+	_, _ = lp.Run(context.Background()) // the attempt is what counts here
 	if pinger.calls != calls {
 		t.Error("retried within the hour")
 	}
