@@ -362,3 +362,9 @@ commands pass locally.
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## More nodes
+
+The design for a second DN42 node (`DN42Node`, internal tunnels, iBGP,
+local_pref across nodes, no internal leaks to DN42) is in
+[docs/ibgp.md](docs/ibgp.md). Not built yet; v0.1 is one node.
