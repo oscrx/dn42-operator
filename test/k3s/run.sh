@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 IMG=${IMG:-ghcr.io/oscrx/dn42-operator:dev}
 BIRD_IMG=${BIRD_IMG:-dn42-bird:dev}
-K3S=${K3S:-rancher/k3s:latest}
+K3S=${K3S:-rancher/k3s:v1.34.1-k3s1}
 NET=dn42-k3s
 S=dn42-k3s-server A=dn42-k3s-a B=dn42-k3s-b
 
@@ -91,12 +91,13 @@ log "OK: rolling update completed, BIRD not restarted"
 log "bird.conf change: reconfigured, not restarted"
 L=$(leader)
 lastreconf() { K -n dn42 exec "$(K -n dn42 get pods -l app.kubernetes.io/name=dn42-bird --field-selector spec.nodeName=$L -o name)" -- \
-  birdc -s /var/run/bird/bird.ctl show status | grep 'Last reconfiguration'; }
+  birdc -s /var/run/dn42-bird/bird.ctl show status | grep 'Last reconfiguration'; }
 R0=$(lastreconf)
 sleep 1
 K -n dn42 get configmap dn42-bird-conf -o yaml | sed 's/scan time 2;/scan time 3;/' | K apply -f - >/dev/null
 waitfor 150 "operator saw the bird.conf change" sh -c "docker exec $S kubectl -n dn42 logs -l app.kubernetes.io/name=dn42-operator --tail=-1 | grep -q 'bird.conf changed'"
 [ "$(lastreconf)" != "$R0" ] || fail "BIRD was not reconfigured ($R0)"
+docker exec "$L" grep -q 'scan time 3' /var/lib/dn42-router/conf/bird.conf || fail "shared bird.conf not updated"
 [ "$(birdpods)" = "$BIRD0" ] || fail "BIRD restarted on a bird.conf change"
 log "OK: bird.conf change applied without a BIRD restart"
 

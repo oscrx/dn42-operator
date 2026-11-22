@@ -74,7 +74,20 @@ func (g *fakeGitHub) handler() http.Handler {
 			var out []map[string]any
 			for i, pl := range g.pulls {
 				out = append(out, map[string]any{"number": i + 1, "html_url": "https://github.com/oscrx/dn42-peers/pull/" + strconv.Itoa(i+1),
-					"head": map[string]string{"sha": "head-" + pl["head"]}})
+					"user": map[string]string{"login": "dn42-autopeer[bot]"},
+					"head": map[string]any{"sha": "head-" + pl["head"], "ref": pl["head"],
+						"repo": map[string]string{"full_name": "oscrx/dn42-peers"}}})
+			}
+			// Anyone can open PRs on a public repo: a fork and a human PR
+			// touching an existing peer must not count as pending.
+			if r.URL.Query().Get("page") == "1" {
+				out = append(out,
+					map[string]any{"number": 900, "html_url": "https://github.com/oscrx/dn42-peers/pull/900",
+						"user": map[string]string{"login": "dn42-autopeer[bot]"},
+						"head": map[string]any{"sha": "x", "ref": "autopeer/evil", "repo": map[string]string{"full_name": "attacker/dn42-peers"}}},
+					map[string]any{"number": 901, "html_url": "https://github.com/oscrx/dn42-peers/pull/901",
+						"user": map[string]string{"login": "someone"},
+						"head": map[string]any{"sha": "y", "ref": "autopeer/x", "repo": map[string]string{"full_name": "oscrx/dn42-peers"}}})
 			}
 			_ = json.NewEncoder(w).Encode(out)
 		case r.Method == http.MethodGet && strings.HasPrefix(p, "/pulls/") && strings.HasSuffix(p, "/files"):
@@ -193,7 +206,7 @@ func TestGitHubApp(t *testing.T) {
 	srv := httptest.NewServer(fg.handler())
 	defer srv.Close()
 	gh := &GitHubApp{Key: parsed, HTTPClient: srv.Client(), Cfg: GitHubConfig{APIURL: srv.URL, Owner: "oscrx", Repo: "dn42-peers",
-		BaseBranch: "main", PeersDir: "peers", AppID: 1234, InstallationID: 77}}
+		BaseBranch: "main", PeersDir: "peers", AppID: 1234, InstallationID: 77, AppLogin: "dn42-autopeer[bot]"}}
 
 	peers, err := gh.ListPeers(t.Context())
 	if err != nil || len(peers) != 1 || peers[0].Name != "old" || *peers[0].Spec.ListenPort != 20001 {

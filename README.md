@@ -173,10 +173,17 @@ LB address is announced only from the leader's node.
 - **just started**, lease not seen yet: changes nothing. A restarted leader
   takes its own lease back immediately (same identity), so a restart doesn't
   flap the tunnels.
-- **losing the lease**: links are removed synchronously, before another
-  replica can take it. **On shutdown** (`--cleanup-on-shutdown`, default on),
-  links are removed and then the lease is released, so a key is never live on
-  two nodes.
+- **losing the lease** (`--teardown-on-lease-loss`, default on): the pass in
+  progress is cancelled and links are removed **before** the lease is
+  released (the lock is wrapped so client-go's release waits). Off, on a
+  single router: an API outage stops changes but keeps the tunnels, and links
+  only go once another holder is seen.
+- **on shutdown** (`--cleanup-on-shutdown`, default on): links are removed,
+  then the lease is released, so a key is never live on two nodes. Off, on a
+  single router, an operator restart doesn't flap any session.
+- **standing down**: `standDown: "true"` in the control ConfigMap makes the
+  leader remove everything and report not ready until the key is gone
+  (rollback, maintenance).
 
 `/readyz` means healthy in the current role: the last pass worked and the
 API server accepted the label that matches the role. Followers are Ready too,

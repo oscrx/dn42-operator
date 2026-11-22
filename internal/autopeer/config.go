@@ -112,6 +112,10 @@ type GitHubConfig struct {
 	PeersDir       string `json:"peersDir"`   // default peers
 	AppID          int64  `json:"appID"`
 	InstallationID int64  `json:"installationID"`
+	// AppLogin is the App's bot user ("<app-slug>[bot]"). Only open PRs by
+	// this login, from an autopeer/ branch in this repo, count as pending:
+	// anyone can open a PR on a public repo.
+	AppLogin       string `json:"appLogin"`
 	PrivateKeyFile string `json:"privateKeyFile"`
 }
 

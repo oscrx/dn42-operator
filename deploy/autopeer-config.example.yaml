@@ -30,6 +30,7 @@ github:
   peersDir: peers
   appID: 0                               # the autopeer GitHub App
   installationID: 0
+  appLogin: dn42-autopeer[bot]           # the App's bot user; only its open PRs count as pending
   privateKeyFile: /secrets/github-app.pem
 
 kubernetes:

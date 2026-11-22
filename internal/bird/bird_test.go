@@ -172,6 +172,8 @@ func TestClientErrors(t *testing.T) {
 // fakeCtl accepts files unless one contains "BAD".
 type fakeCtl struct {
 	dir        string
+	conf       string // bird.conf BIRD loads; rejected if it contains BAD
+	failConf   bool   // configure fails (BIRD busy, socket hiccup)
 	down       bool
 	checks     int
 	configures int
@@ -189,10 +191,18 @@ func (f *fakeCtl) ConfigureCheck(context.Context) error {
 			return &ReplyError{Code: 8002, Message: e.Name() + ": syntax error"}
 		}
 	}
+	if f.conf != "" {
+		if b, _ := os.ReadFile(f.conf); strings.Contains(string(b), "BAD") {
+			return &ReplyError{Code: 8002, Message: "bird.conf: syntax error"}
+		}
+	}
 	return nil
 }
 
 func (f *fakeCtl) Configure(context.Context) error {
+	if f.failConf {
+		return errors.New("configure: connection reset")
+	}
 	if f.down {
 		return errors.New("dial: connection refused")
 	}
@@ -330,5 +340,82 @@ func TestDirReconfiguresOnConfigChange(t *testing.T) {
 	}
 	if ctl.configures != 2 {
 		t.Error("reconfigured again without a change")
+	}
+}
+
+func TestDirRetriesFailedConfigure(t *testing.T) {
+	path := t.TempDir()
+	ctl := &fakeCtl{dir: path}
+	d := &Dir{Path: path, Bird: ctl}
+	ctx := context.Background()
+	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ctl.failConf = true
+	if _, err := d.Sync(ctx, map[string]string{"a": "A", "b": "B"}, nil); err == nil {
+		t.Fatal("configure failure not reported")
+	}
+	ctl.failConf = false
+	// Same input again: b is already on disk, but BIRD never loaded it.
+	res, err := d.Sync(ctx, map[string]string{"a": "A", "b": "B"}, nil)
+	if err != nil || !res.Reloaded {
+		t.Fatalf("failed configure not retried: %+v %v", res, err)
+	}
+	// Clear retries too.
+	ctl.failConf = true
+	if _, err := d.Clear(ctx); err == nil {
+		t.Fatal("configure failure not reported")
+	}
+	ctl.failConf = false
+	before := ctl.configures
+	if _, err := d.Clear(ctx); err != nil || ctl.configures != before+1 {
+		t.Errorf("failed configure after clear not retried: %d %v", ctl.configures-before, err)
+	}
+}
+
+func TestDirSharedConfigFile(t *testing.T) {
+	path := t.TempDir()
+	cdir := t.TempDir()
+	src, live := filepath.Join(cdir, "src.conf"), filepath.Join(cdir, "bird.conf")
+	write := func(p, c string) {
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(p string) string { b, _ := os.ReadFile(p); return string(b) }
+	write(src, "v1")
+	write(live, "v1")
+	ctl := &fakeCtl{dir: path, conf: live}
+	d := &Dir{Path: path, Bird: ctl, ConfigFile: live, ConfigSource: src}
+	ctx := context.Background()
+	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	// A good new version: copied to the file BIRD loads, then configured.
+	write(src, "v2")
+	res, err := d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if err != nil || !res.ConfigChanged || read(live) != "v2" {
+		t.Fatalf("v2: %+v %v live=%q", res, err, read(live))
+	}
+	// A version BIRD refuses: rolled back, reported, peers still synced.
+	write(src, "v3 BAD")
+	res, err = d.Sync(ctx, map[string]string{"a": "A", "b": "B"}, nil)
+	if err != nil || res.ConfigRejected == nil || !errors.Is(res.ConfigRejected, ErrConfigRejected) {
+		t.Fatalf("bad config: %+v %v", res, err)
+	}
+	if read(live) != "v2" {
+		t.Errorf("rejected bird.conf left in place: %q", read(live))
+	}
+	if got := readDir(t, d); got["b"] != "B" {
+		t.Errorf("peer not synced while bird.conf was rejected: %v", got)
+	}
+	// BIRD unreachable: nothing copied.
+	write(src, "v4")
+	ctl.down = true
+	if _, err := d.Sync(ctx, map[string]string{"a": "A", "b": "B"}, nil); err == nil {
+		t.Error("no error with BIRD down")
+	}
+	if read(live) != "v2" {
+		t.Errorf("bird.conf copied while BIRD was down: %q", read(live))
 	}
 }

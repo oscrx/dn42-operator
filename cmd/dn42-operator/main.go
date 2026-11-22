@@ -46,7 +46,8 @@ func main() {
 		sharedKey       = flag.String("shared-key", "autopeer", "key in the Secret for peers without keyRef")
 		vrf             = flag.String("vrf", "vrf-dn42", "VRF the links go into (must exist)")
 		birdSocket      = flag.String("bird-socket", "/run/bird/bird.ctl", "BIRD control socket")
-		birdConfig      = flag.String("bird-config", "", "BIRD's main config; a change triggers configure (not a restart); empty: not watched")
+		birdConfig      = flag.String("bird-config", "", "the bird.conf BIRD loads (shared with BIRD); a change triggers configure, never a restart; empty: not watched")
+		birdConfigSrc   = flag.String("bird-config-source", "", "where new bird.conf versions appear (ConfigMap mount); copied to --bird-config once BIRD accepts them")
 		peersDir        = flag.String("peers-dir", "/etc/bird/peers", "directory bird.conf includes peer snippets from")
 		birdTemplate    = flag.String("bird-template", "dnpeers", "BIRD bgp template the peers use")
 		service         = flag.String("endpoint-service", "", "Service whose spec.ports the operator sets (empty: none)")
@@ -54,7 +55,8 @@ func main() {
 		maxDeleteFrac   = flag.Float64("max-delete-fraction", 0.5, "refuse a pass that would delete more than this share of the managed links")
 		metricsAddr     = flag.String("metrics-bind-address", ":9842", "metrics address (host network: pick a free port)")
 		probeAddr       = flag.String("health-probe-bind-address", ":9843", "health probe address")
-		cleanupShutdown = flag.Bool("cleanup-on-shutdown", true, "remove managed links before releasing the lease on shutdown")
+		cleanupShutdown = flag.Bool("cleanup-on-shutdown", true, "remove managed links before releasing the lease on shutdown (needed with a standby; false on a single router so restarts don't flap sessions)")
+		teardownOnLoss  = flag.Bool("teardown-on-lease-loss", true, "remove managed links as soon as the lease can't be renewed (needed with a standby; false on a single router so an API outage keeps the tunnels up)")
 		podName         = flag.String("pod-name", os.Getenv("POD_NAME"), "own pod name, for the leader label (empty: no label)")
 		leaderLabel     = flag.String("leader-label", ourctrl.DefaultLeaderLabel, "pod label the endpoint Service selects the leader by")
 		statusInterval  = flag.Duration("status-interval", 30*time.Second, "status and metrics interval")
@@ -68,10 +70,10 @@ func main() {
 	if err := run(&runConfig{
 		namespace: *namespace, identity: *identity, leaseName: *leaseName,
 		keySecret: *keySecret, sharedKey: *sharedKey, vrf: *vrf,
-		birdSocket: *birdSocket, peersDir: *peersDir, birdConfig: *birdConfig, birdTemplate: *birdTemplate,
+		birdSocket: *birdSocket, peersDir: *peersDir, birdConfig: *birdConfig, birdConfigSrc: *birdConfigSrc, birdTemplate: *birdTemplate,
 		service: *service, controlCM: *controlCM, maxDeleteFrac: *maxDeleteFrac,
 		metricsAddr: *metricsAddr, probeAddr: *probeAddr,
-		cleanupShutdown: *cleanupShutdown, statusInterval: *statusInterval,
+		cleanupShutdown: *cleanupShutdown, teardownOnLoss: *teardownOnLoss, statusInterval: *statusInterval,
 		podName: *podName, leaderLabel: *leaderLabel,
 	}); err != nil {
 		log.Error(err, "exiting")
@@ -82,10 +84,10 @@ func main() {
 type runConfig struct {
 	namespace, identity, leaseName, keySecret, sharedKey, vrf string
 	birdSocket, peersDir, birdTemplate, service, controlCM    string
-	birdConfig                                                string
+	birdConfig, birdConfigSrc                                 string
 	maxDeleteFrac                                             float64
 	metricsAddr, probeAddr                                    string
-	cleanupShutdown                                           bool
+	cleanupShutdown, teardownOnLoss                           bool
 	statusInterval                                            time.Duration
 	podName, leaderLabel                                      string
 }
@@ -147,7 +149,7 @@ func run(c *runConfig) error {
 		ControlConfigMap:  c.controlCM,
 		MaxDeleteFraction: c.maxDeleteFrac,
 		NetDev:            netdev.NewLinux(),
-		Dir:               &bird.Dir{Path: c.peersDir, Bird: birdClient, ConfigFile: c.birdConfig},
+		Dir:               &bird.Dir{Path: c.peersDir, Bird: birdClient, ConfigFile: c.birdConfig, ConfigSource: c.birdConfigSrc},
 		Bird:              birdClient,
 		Renderer:          bird.Renderer{Template: c.birdTemplate},
 		Resolve:           ourctrl.DefaultResolver,
@@ -185,17 +187,19 @@ func run(c *runConfig) error {
 		return err
 	}
 	if err := mgr.Add(&ourctrl.Elector{
-		Client:            cs.CoordinationV1(),
-		Namespace:         c.namespace,
-		Name:              c.leaseName,
-		Identity:          c.identity,
-		LeaseDuration:     15 * time.Second,
-		RenewDeadline:     10 * time.Second,
-		RetryPeriod:       2 * time.Second,
-		State:             state,
-		Teardown:          r.Teardown,
-		Trigger:           r.Trigger,
-		CleanupOnShutdown: c.cleanupShutdown,
+		Client:              cs.CoordinationV1(),
+		Namespace:           c.namespace,
+		Name:                c.leaseName,
+		Identity:            c.identity,
+		LeaseDuration:       15 * time.Second,
+		RenewDeadline:       10 * time.Second,
+		RetryPeriod:         2 * time.Second,
+		State:               state,
+		Teardown:            r.Teardown,
+		CancelPass:          r.CancelPass,
+		Trigger:             r.Trigger,
+		CleanupOnShutdown:   c.cleanupShutdown,
+		TeardownOnLeaseLoss: c.teardownOnLoss,
 	}); err != nil {
 		return err
 	}

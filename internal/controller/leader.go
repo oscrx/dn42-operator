@@ -56,21 +56,79 @@ type Elector struct {
 	// Identity should be the node name, so a restarted pod on the same node
 	// takes its own lease back at once.
 	Identity string
+	// Lock overrides the Lease lock (tests).
+	Lock resourcelock.Interface
 
 	LeaseDuration, RenewDeadline, RetryPeriod time.Duration
 
 	State *RoleState
 	// Teardown removes all managed links and peer configs.
 	Teardown func(ctx context.Context) error
+	// CancelPass aborts a reconcile pass in progress, so Teardown doesn't
+	// wait behind it.
+	CancelPass func()
 	// Trigger asks for a reconcile pass.
 	Trigger func()
-	// CleanupOnShutdown tears down before releasing the lease on shutdown,
-	// so a tunnel key is never live on two nodes.
+	// CleanupOnShutdown tears down before releasing the lease on shutdown.
+	// Needed with a standby (a key must never be live on two nodes); off on a
+	// single router, so an operator restart doesn't flap every session.
 	CleanupOnShutdown bool
+	// TeardownOnLeaseLoss tears down as soon as the lease can't be renewed,
+	// before another replica can take it. Needed with a standby. Off on a
+	// single router: an API outage then stops all changes but keeps the
+	// tunnels up, and links are only removed once another holder is seen.
+	TeardownOnLeaseLoss bool
 }
 
 // NeedLeaderElection makes the manager run the elector on every replica.
 func (e *Elector) NeedLeaderElection() bool { return false }
+
+// releaseGuard wraps the lock so that releasing it (client-go writes an
+// empty holder) waits until this replica has stood down. client-go releases
+// before it calls OnStoppedLeading; without this, another replica could take
+// the lease while our tunnels still run.
+type releaseGuard struct {
+	resourcelock.Interface
+	beforeRelease func()
+}
+
+//nolint:gocritic // hugeParam: the signature is resourcelock.Interface's
+func (g *releaseGuard) Update(ctx context.Context, rec resourcelock.LeaderElectionRecord) error {
+	if rec.HolderIdentity == "" {
+		g.beforeRelease()
+	}
+	return g.Interface.Update(ctx, rec)
+}
+
+// lostLease handles the end of our term other than by shutdown. It runs
+// before the lease is released (releaseGuard) or, if no release happens,
+// from OnStoppedLeading; only the first call does anything.
+func (e *Elector) lostLease() {
+	if e.State.Get() != RoleLeader {
+		return
+	}
+	log := ctrl.Log.WithName("leader")
+	if !e.TeardownOnLeaseLoss {
+		// Touch nothing until we know who holds the lease: either we take it
+		// back, or another holder appears and we become a follower.
+		e.State.Set(RoleUnknown)
+		if e.CancelPass != nil {
+			e.CancelPass()
+		}
+		log.Info("lost the lease, keeping the tunnels until another holder is seen")
+		return
+	}
+	e.State.Set(RoleFollower)
+	if e.CancelPass != nil {
+		e.CancelPass()
+	}
+	log.Info("lost the lease, removing managed links before it can be taken over")
+	tctx, tcancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer tcancel()
+	if err := e.Teardown(tctx); err != nil {
+		log.Error(err, "teardown after losing the lease")
+	}
+}
 
 // Start runs the election until ctx is done.
 func (e *Elector) Start(ctx context.Context) error {
@@ -79,25 +137,31 @@ func (e *Elector) Start(ctx context.Context) error {
 	defer cancel()
 	go func() {
 		<-ctx.Done()
-		if e.State.Get() == RoleLeader && e.CleanupOnShutdown {
-			e.State.Set(RoleStopping)
+		wasLeader := e.State.Get() == RoleLeader
+		e.State.Set(RoleStopping)
+		if wasLeader && e.CleanupOnShutdown {
+			if e.CancelPass != nil {
+				e.CancelPass()
+			}
 			tctx, tcancel := context.WithTimeout(context.Background(), 20*time.Second)
 			if err := e.Teardown(tctx); err != nil {
 				log.Error(err, "teardown on shutdown")
 			}
 			tcancel()
-		} else {
-			e.State.Set(RoleStopping)
 		}
 		// Now release the lease.
 		cancel()
 	}()
 
-	lock := &resourcelock.LeaseLock{
-		LeaseMeta:  metaFor(e.Namespace, e.Name),
-		Client:     e.Client,
-		LockConfig: resourcelock.ResourceLockConfig{Identity: e.Identity},
+	lock := e.Lock
+	if lock == nil {
+		lock = &resourcelock.LeaseLock{
+			LeaseMeta:  metaFor(e.Namespace, e.Name),
+			Client:     e.Client,
+			LockConfig: resourcelock.ResourceLockConfig{Identity: e.Identity},
+		}
 	}
+	lock = &releaseGuard{Interface: lock, beforeRelease: e.lostLease}
 	for ectx.Err() == nil {
 		le, err := leaderelection.NewLeaderElector(leaderelection.LeaderElectionConfig{
 			Lock:            lock,
@@ -107,8 +171,9 @@ func (e *Elector) Start(ctx context.Context) error {
 			ReleaseOnCancel: true,
 			Name:            e.Name,
 			Callbacks: leaderelection.LeaderCallbacks{
-				OnStartedLeading: func(context.Context) {
-					if e.State.Get() == RoleStopping {
+				OnStartedLeading: func(lctx context.Context) {
+					// Runs in its own goroutine: the term may already be over.
+					if lctx.Err() != nil || e.State.Get() == RoleStopping {
 						return
 					}
 					log.Info("became leader")
@@ -119,18 +184,7 @@ func (e *Elector) Start(ctx context.Context) error {
 					if e.State.Get() == RoleStopping {
 						return
 					}
-					was := e.State.Get()
-					e.State.Set(RoleFollower)
-					if was == RoleLeader {
-						log.Info("lost the lease, removing managed links")
-						// Synchronous: the links must be gone before another
-						// replica can take the lease.
-						tctx, tcancel := context.WithTimeout(context.Background(), 5*time.Second)
-						if err := e.Teardown(tctx); err != nil {
-							log.Error(err, "teardown after losing the lease")
-						}
-						tcancel()
-					}
+					e.lostLease()
 					e.Trigger()
 				},
 				OnNewLeader: func(id string) {

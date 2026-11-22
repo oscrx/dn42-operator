@@ -537,3 +537,30 @@ func TestPerPeerMTUAndLinkLocal(t *testing.T) {
 		t.Errorf("zz.conf:\n%s", b)
 	}
 }
+
+func TestStandDownSwitch(t *testing.T) {
+	a := mkPeer("iedon", 4242422189, 0, "fe80::2189:177", 0)
+	u := newUnit(t, a, keySecret(t, "autopeer"), endpointService())
+	u.mustPass()
+	if len(u.managedLinks()) != 1 {
+		t.Fatal("no link")
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "control"},
+		Data: map[string]string{StandDownKey: "true"}}
+	u.create(cm)
+	u.mustPass()
+	if len(u.managedLinks()) != 0 || len(u.files()) != 0 {
+		t.Errorf("still up while standing down: %v %v", u.managedLinks(), u.files())
+	}
+	if u.r.Ready() == nil {
+		t.Error("ready while standing down")
+	}
+	delete(cm.Data, StandDownKey)
+	if err := u.c.Update(context.Background(), cm); err != nil {
+		t.Fatal(err)
+	}
+	u.mustPass()
+	if len(u.managedLinks()) != 1 || u.r.Ready() != nil {
+		t.Errorf("not rebuilt after the switch was removed: %v %v", u.managedLinks(), u.r.Ready())
+	}
+}

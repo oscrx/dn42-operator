@@ -37,6 +37,15 @@ const FieldOwner = "dn42-operator"
 // blocked mass deletion: set it to the number of links to delete.
 const ConfirmDeletionsKey = "confirmDeletions"
 
+// StandDownKey in the control ConfigMap, set to "true", makes the leader
+// remove all managed links and peer snippets and stay that way (not ready)
+// until the key is removed: the first step of a rollback to another setup,
+// or of maintenance.
+const StandDownKey = "standDown"
+
+// errNotLeader aborts a pass whose term ended while it ran.
+var errNotLeader = errors.New("no longer the leader, pass aborted")
+
 // Tunnel reasons for the TunnelReady condition.
 const (
 	ReasonHandshake         = "Handshake"
@@ -110,6 +119,11 @@ type Reconciler struct {
 	results  map[string]*peerResult
 	lastPass error
 	passed   bool
+	// standingDown is true while the control ConfigMap says standDown.
+	standingDown bool
+
+	cancelMu   sync.Mutex
+	passCancel context.CancelFunc
 }
 
 func (r *Reconciler) now() time.Time {
@@ -158,6 +172,9 @@ func (r *Reconciler) Ready() error {
 	if !r.passed {
 		return errors.New("no pass completed yet")
 	}
+	if r.standingDown {
+		return errors.New("standing down (control ConfigMap)")
+	}
 	if r.lastPass != nil {
 		return fmt.Errorf("last %s pass failed: %w", role, r.lastPass)
 	}
@@ -175,12 +192,34 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	mPasses.Inc()
+	// The elector cancels this when the lease is lost or the pod stops, so
+	// Teardown never waits behind slow BIRD or DNS calls.
+	ctx, cancel := context.WithCancel(ctx)
+	r.cancelMu.Lock()
+	r.passCancel = cancel
+	r.cancelMu.Unlock()
+	defer func() {
+		r.cancelMu.Lock()
+		r.passCancel = nil
+		r.cancelMu.Unlock()
+		cancel()
+	}()
 	var err error
 	switch r.State.Get() {
 	case RoleLeader:
+		if r.standDownRequested(ctx) {
+			if !r.standingDown {
+				ctrl.LoggerFrom(ctx).Info("standing down: control ConfigMap says " + StandDownKey)
+			}
+			r.standingDown = true
+			err = r.teardownLocked(ctx)
+			break
+		}
+		r.standingDown = false
 		err = r.leaderPass(ctx)
-		if r.Labeler != nil {
-			// Label whatever the pass result: readiness reflects health.
+		// Label whatever the pass result (readiness reflects health), but
+		// only while still leading: a term may end during a pass.
+		if r.Labeler != nil && r.State.Get() == RoleLeader {
 			err = errors.Join(err, r.Labeler.ClearOthers(ctx), r.Labeler.Set(ctx, true))
 		}
 	case RoleFollower:
@@ -196,6 +235,26 @@ func (r *Reconciler) Pass(ctx context.Context) error {
 	default:
 	}
 	return err
+}
+
+// CancelPass aborts a pass in progress (its context is cancelled).
+func (r *Reconciler) CancelPass() {
+	r.cancelMu.Lock()
+	defer r.cancelMu.Unlock()
+	if r.passCancel != nil {
+		r.passCancel()
+	}
+}
+
+func (r *Reconciler) standDownRequested(ctx context.Context) bool {
+	if r.ControlConfigMap == "" || r.APIReader == nil {
+		return false
+	}
+	var cm corev1.ConfigMap
+	if err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: r.Namespace, Name: r.ControlConfigMap}, &cm); err != nil {
+		return false
+	}
+	return cm.Data[StandDownKey] == "true"
 }
 
 // Teardown removes every managed link and peer config, regardless of the
@@ -339,6 +398,10 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 				spec.Endpoint = addr
 			}
 		}
+		// Re-check before every link change: the term may have ended.
+		if r.State.Get() != RoleLeader || ctx.Err() != nil {
+			return errNotLeader
+		}
 		plan, err := r.NetDev.Ensure(spec, now)
 		switch {
 		case errors.Is(err, netdev.ErrNotManaged):
@@ -428,6 +491,10 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 		}
 		if sres.ConfigChanged {
 			log.Info("bird.conf changed, bird reconfigured")
+		}
+		if sres.ConfigRejected != nil {
+			mPassErrors.WithLabelValues("bird-config").Inc()
+			errs = append(errs, sres.ConfigRejected)
 		}
 		if len(sres.Written)+len(sres.Deleted) > 0 {
 			log.Info("bird reconfigured", "written", sres.Written, "deleted", sres.Deleted)

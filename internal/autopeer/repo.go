@@ -141,10 +141,31 @@ type GitHubApp struct {
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+
+	// A short cache, so page views don't spend the App's API rate limit.
+	cacheMu      sync.Mutex
+	peersCache   []dn42v1.DN42Peer
+	pendingCache []Pending
+	peersAt      time.Time
+	pendingAt    time.Time
+}
+
+// cacheTTL bounds how stale the peer and pending lists may be. OpenPR
+// clears the cache, so a user sees their own new PR at once.
+const cacheTTL = 30 * time.Second
+
+func (g *GitHubApp) invalidate() {
+	g.cacheMu.Lock()
+	defer g.cacheMu.Unlock()
+	g.peersCache, g.pendingCache = nil, nil
+	g.peersAt, g.pendingAt = time.Time{}, time.Time{}
 }
 
 // NewGitHubApp loads the App's private key.
 func NewGitHubApp(cfg *GitHubConfig) (*GitHubApp, error) {
+	if cfg.AppLogin == "" {
+		return nil, errors.New("github.appLogin is required (the App's bot login, <app-slug>[bot])")
+	}
 	b, err := os.ReadFile(cfg.PrivateKeyFile)
 	if err != nil {
 		return nil, err
@@ -284,8 +305,27 @@ type contentEntry struct {
 	SHA     string `json:"sha"`
 }
 
-// ListPeers reads every *.yaml in the peers dir on the base branch.
+// ListPeers reads every *.yaml in the peers dir on the base branch (cached
+// for cacheTTL).
 func (g *GitHubApp) ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
+	g.cacheMu.Lock()
+	if g.peersCache != nil && g.now().Sub(g.peersAt) < cacheTTL {
+		out := append([]dn42v1.DN42Peer(nil), g.peersCache...)
+		g.cacheMu.Unlock()
+		return out, nil
+	}
+	g.cacheMu.Unlock()
+	out, err := g.listPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g.cacheMu.Lock()
+	g.peersCache, g.peersAt = append([]dn42v1.DN42Peer{}, out...), g.now()
+	g.cacheMu.Unlock()
+	return out, nil
+}
+
+func (g *GitHubApp) listPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
 	ref := url.QueryEscape(g.Cfg.BaseBranch)
 	var entries []contentEntry
 	err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(g.Cfg.PeersDir), ref), nil, &entries)
@@ -320,6 +360,7 @@ func (g *GitHubApp) ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
 
 // OpenPR branches from the base head, changes the file and opens the PR.
 func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error) {
+	defer g.invalidate()
 	var ref struct {
 		Object struct {
 			SHA string `json:"sha"`
@@ -377,15 +418,62 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 // PendingPeers reads the open PRs and the peer files they change (at the
 // PR head).
 func (g *GitHubApp) PendingPeers(ctx context.Context) ([]Pending, error) {
-	var pulls []struct {
-		Number  int    `json:"number"`
-		HTMLURL string `json:"html_url"`
-		Head    struct {
-			SHA string `json:"sha"`
-		} `json:"head"`
+	g.cacheMu.Lock()
+	if g.pendingCache != nil && g.now().Sub(g.pendingAt) < cacheTTL {
+		out := append([]Pending(nil), g.pendingCache...)
+		g.cacheMu.Unlock()
+		return out, nil
 	}
-	if err := g.api(ctx, http.MethodGet, g.repoPath("/pulls?state=open&per_page=100"), nil, &pulls); err != nil {
-		return nil, fmt.Errorf("open PRs: %w", err)
+	g.cacheMu.Unlock()
+	out, err := g.pendingPeers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g.cacheMu.Lock()
+	g.pendingCache, g.pendingAt = append([]Pending{}, out...), g.now()
+	g.cacheMu.Unlock()
+	return out, nil
+}
+
+type pull struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	User    struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
+		SHA  string `json:"sha"`
+		Ref  string `json:"ref"`
+		Repo *struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"head"`
+}
+
+// ours: opened by the App, from an autopeer/ branch in this repository.
+// Anyone can open a PR on a public repo; those must never block or reserve
+// anything for a real peer.
+func (g *GitHubApp) ours(p *pull) bool {
+	return g.Cfg.AppLogin != "" && p.User.Login == g.Cfg.AppLogin &&
+		p.Head.Repo != nil && strings.EqualFold(p.Head.Repo.FullName, g.Cfg.Owner+"/"+g.Cfg.Repo) &&
+		strings.HasPrefix(p.Head.Ref, "autopeer/")
+}
+
+func (g *GitHubApp) pendingPeers(ctx context.Context) ([]Pending, error) {
+	var pulls []pull
+	for page := 1; page <= 10; page++ {
+		var batch []pull
+		if err := g.api(ctx, http.MethodGet, g.repoPath("/pulls?state=open&per_page=100&page=%d", page), nil, &batch); err != nil {
+			return nil, fmt.Errorf("open PRs: %w", err)
+		}
+		for i := range batch {
+			if g.ours(&batch[i]) {
+				pulls = append(pulls, batch[i])
+			}
+		}
+		if len(batch) < 100 {
+			break
+		}
 	}
 	var out []Pending
 	for _, pl := range pulls {

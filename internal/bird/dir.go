@@ -1,6 +1,7 @@
 package bird
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,10 +27,16 @@ type Controller interface {
 type Dir struct {
 	Path string
 	Bird Controller
-	// ConfigFile is BIRD's main config (optional). When its content changes,
-	// the next Sync runs configure check + configure, so edits to bird.conf
-	// reach BIRD by reconfiguring, never by restarting it.
+	// ConfigFile is BIRD's main config (optional): the file BIRD itself
+	// loads. When its content changes, the next Sync runs configure check +
+	// configure, so edits reach BIRD by reconfiguring, never by restarting it.
 	ConfigFile string
+	// ConfigSource (optional) is where new bird.conf versions appear (the
+	// operator's ConfigMap mount). Sync copies it to ConfigFile, but only
+	// after BIRD's configure check accepts it; a rejected version is rolled
+	// back. One file shared with BIRD means BIRD never reconfigures from a
+	// copy older than the one that was checked.
+	ConfigSource string
 
 	configured bool   // a configure succeeded since start
 	configHash string // ConfigFile hash at the last successful configure
@@ -50,6 +57,47 @@ func (d *Dir) currentConfigHash() string {
 // upToDate: BIRD was configured since start and bird.conf hasn't changed.
 func (d *Dir) upToDate(hash string) bool { return d.configured && hash == d.configHash }
 
+// ErrConfigRejected wraps BIRD refusing a new bird.conf from ConfigSource.
+var ErrConfigRejected = errors.New("bird refused the new bird.conf, kept the old one")
+
+// syncConfigFile copies a new ConfigSource version into ConfigFile once BIRD
+// accepts it. It returns ErrConfigRejected (wrapped) when BIRD refuses it,
+// or the error when BIRD can't be asked; both leave ConfigFile as it was.
+func (d *Dir) syncConfigFile(ctx context.Context) error {
+	if d.ConfigSource == "" || d.ConfigFile == "" {
+		return nil
+	}
+	src, err := os.ReadFile(d.ConfigSource)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", d.ConfigSource, err)
+	}
+	old, err := os.ReadFile(d.ConfigFile)
+	hadOld := err == nil
+	if hadOld && bytes.Equal(old, src) {
+		return nil
+	}
+	put := func(b []byte) error {
+		tmp := d.ConfigFile + ".tmp"
+		if err := os.WriteFile(tmp, b, 0o644); err != nil {
+			return err
+		}
+		return os.Rename(tmp, d.ConfigFile)
+	}
+	if err := put(src); err != nil {
+		return err
+	}
+	if err := d.Bird.ConfigureCheck(ctx); err != nil {
+		if hadOld {
+			_ = put(old)
+		}
+		if IsRejected(err) {
+			return fmt.Errorf("%w: %w", ErrConfigRejected, err)
+		}
+		return err
+	}
+	return nil
+}
+
 // SyncResult reports what Sync did.
 type SyncResult struct {
 	// Rejected holds the peers whose new snippet BIRD refused; their old
@@ -61,6 +109,9 @@ type SyncResult struct {
 	Reloaded bool
 	// ConfigChanged is true when the reload was (also) for a changed bird.conf.
 	ConfigChanged bool
+	// ConfigRejected is set when BIRD refused a new bird.conf version; the
+	// old one stays loaded and the peer snippets are still synced.
+	ConfigRejected error
 }
 
 // Read returns the managed files by peer name.
@@ -127,6 +178,12 @@ func IsRejected(err error) bool {
 // error is returned.
 func (d *Dir) Sync(ctx context.Context, desired map[string]string, keep map[string]bool) (*SyncResult, error) {
 	res := &SyncResult{Rejected: map[string]error{}}
+	if err := d.syncConfigFile(ctx); err != nil {
+		if !errors.Is(err, ErrConfigRejected) {
+			return nil, err
+		}
+		res.ConfigRejected = err
+	}
 	current, err := d.Read()
 	if err != nil {
 		return nil, err
@@ -207,6 +264,9 @@ func (d *Dir) Sync(ctx context.Context, desired map[string]string, keep map[stri
 	}
 
 	if err := d.Bird.Configure(ctx); err != nil {
+		// Not up to date any more: the next Sync configures again even if
+		// nothing else changes.
+		d.configured = false
 		return nil, err
 	}
 	res.ConfigChanged = d.configured && hash != d.configHash
@@ -237,6 +297,7 @@ func (d *Dir) Clear(ctx context.Context) (removed []string, err error) {
 		return nil, nil
 	}
 	if err := d.Bird.Configure(ctx); err != nil {
+		d.configured = false
 		return removed, err
 	}
 	d.configured, d.configHash = true, hash

@@ -211,7 +211,7 @@ func TestOIDCLoginAndSubmit(t *testing.T) {
 	}
 	pr := a.repo.PRs[0]
 	if pr.Path != "peers/4242420010-kio.yaml" || !strings.HasPrefix(pr.Branch, "autopeer/4242420010-kio-") ||
-		!strings.Contains(pr.Body, "user-1 (kioubit)") {
+		!strings.Contains(pr.Body, "`user-1` (kioubit)") {
 		t.Errorf("PR: %+v", pr)
 	}
 	obj, err := ParsePeerFile(pr.Content)

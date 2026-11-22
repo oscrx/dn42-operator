@@ -150,7 +150,7 @@ jobs:
       # Renovate stops raising PRs entirely when its config is invalid, which
       # is silent unless you go looking. Catch it here.
       - name: Validate
-        run: npx --yes --package renovate renovate-config-validator --strict renovate.json
+        run: npx --yes --package renovate@44.257.9 renovate-config-validator --strict renovate.json
 
   manifests:
     name: Validate manifests
@@ -160,12 +160,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
       # kubeconform needs no cluster, unlike kubectl --dry-run=client.
+      # go install verifies the module against the Go checksum database.
       - name: Install kubeconform
         run: |
-          version=v0.6.7
-          curl -fsSL "https://github.com/yannh/kubeconform/releases/download/${version}/kubeconform-linux-amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin kubeconform
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
           kubeconform -v
 
       - name: Validate
@@ -190,7 +194,12 @@ jobs:
           persist-credentials: false
 
       - name: Kernel modules
-        run: sudo modprobe -a wireguard vrf
+        # vrf.ko is in linux-modules-extra on the Azure kernels GitHub's
+        # Ubuntu runners use; wireguard is built in.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" || echo "no linux-modules-extra for $(uname -r)"
+          sudo modprobe -a wireguard vrf
 
       # A privileged container builds a real vrf-dn42, WireGuard links and
       # BIRD, plus a second network namespace as the peer, up to BGP
@@ -209,7 +218,12 @@ jobs:
           persist-credentials: false
 
       - name: Kernel modules
-        run: sudo modprobe -a wireguard vrf
+        # vrf.ko is in linux-modules-extra on the Azure kernels GitHub's
+        # Ubuntu runners use; wireguard is built in.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" || echo "no linux-modules-extra for $(uname -r)"
+          sudo modprobe -a wireguard vrf
 
       - name: k3s test
         run: make k3s-test

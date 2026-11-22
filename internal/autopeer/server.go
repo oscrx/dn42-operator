@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -375,7 +376,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		Content: content,
 		Title:   fmt.Sprintf("Add peer AS%d %s", obj.Spec.ASN, obj.Name),
 		Body: fmt.Sprintf("Submitted through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- Listen port: %d\n- File: %#q\n",
-			obj.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, *obj.Spec.ListenPort, path),
+			obj.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, *obj.Spec.ListenPort, path),
 	})
 	if err != nil {
 		log.Error(err, "open PR", "peer", obj.Name)
@@ -458,7 +459,7 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 		Delete: true,
 		Title:  fmt.Sprintf("Remove peer AS%d %s", target.Spec.ASN, target.Name),
 		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
-			target.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
+			target.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, path),
 	})
 	if err != nil {
 		log.Error(err, "open removal PR", "peer", target.Name)
@@ -532,7 +533,7 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		Content: content,
 		Title:   fmt.Sprintf("Update peer AS%d %s", obj.Spec.ASN, obj.Name),
 		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
-			obj.Spec.ASN, sess.Identity.Subject, sess.Identity.Provider, path),
+			obj.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, path),
 	})
 	if err != nil {
 		log.Error(err, "open update PR", "peer", obj.Name)
@@ -542,4 +543,19 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 	log.Info("peer update requested", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
 	s.render(w, http.StatusOK, "done.html", map[string]any{
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
+}
+
+// mdCode renders untrusted text (the IdP subject) as a Markdown code span in
+// PR bodies, so it can't mention users or add links.
+func mdCode(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if r == '`' || r < 0x20 {
+			return '\''
+		}
+		return r
+	}, s)
+	if len(s) > 100 {
+		s = s[:100]
+	}
+	return "`" + s + "`"
 }

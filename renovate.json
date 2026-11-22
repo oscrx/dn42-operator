@@ -18,6 +18,28 @@
   "postUpdateOptions": ["gomodTidy"],
   "customManagers": [
     {
+      "description": "The k3s image of the k3s test.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^test/k3s/run\\.sh$/"],
+      "matchStrings": ["K3S:-(?<depName>rancher/k3s):(?<currentValue>v[^}]+)}"],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "description": "The Renovate validator CI runs, and kubeconform.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yaml$/"],
+      "matchStrings": ["--package renovate@(?<currentValue>[0-9.]+)"],
+      "depNameTemplate": "renovate",
+      "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yaml$/"],
+      "matchStrings": ["kubeconform/cmd/kubeconform@(?<currentValue>v[0-9.]+)"],
+      "depNameTemplate": "github.com/yannh/kubeconform",
+      "datasourceTemplate": "go"
+    },
+    {
       "description": "make lint pins the same golangci-lint as ci.yaml.",
       "customType": "regex",
       "managerFilePatterns": ["/^Makefile$/"],
