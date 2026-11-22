@@ -2,6 +2,8 @@ package bird
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -24,9 +26,29 @@ type Controller interface {
 type Dir struct {
 	Path string
 	Bird Controller
+	// ConfigFile is BIRD's main config (optional). When its content changes,
+	// the next Sync runs configure check + configure, so edits to bird.conf
+	// reach BIRD by reconfiguring, never by restarting it.
+	ConfigFile string
 
-	configured bool // a configure succeeded since start
+	configured bool   // a configure succeeded since start
+	configHash string // ConfigFile hash at the last successful configure
 }
+
+func (d *Dir) currentConfigHash() string {
+	if d.ConfigFile == "" {
+		return ""
+	}
+	b, err := os.ReadFile(d.ConfigFile)
+	if err != nil {
+		return "unreadable"
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// upToDate: BIRD was configured since start and bird.conf hasn't changed.
+func (d *Dir) upToDate(hash string) bool { return d.configured && hash == d.configHash }
 
 // SyncResult reports what Sync did.
 type SyncResult struct {
@@ -37,6 +59,8 @@ type SyncResult struct {
 	Deleted  []string
 	// Reloaded is true when "configure" ran.
 	Reloaded bool
+	// ConfigChanged is true when the reload was (also) for a changed bird.conf.
+	ConfigChanged bool
 }
 
 // Read returns the managed files by peer name.
@@ -120,7 +144,8 @@ func (d *Dir) Sync(ctx context.Context, desired map[string]string, keep map[stri
 	}
 	sort.Strings(deletes)
 	sort.Strings(upserts)
-	if len(deletes) == 0 && len(upserts) == 0 && d.configured {
+	hash := d.currentConfigHash()
+	if len(deletes) == 0 && len(upserts) == 0 && d.upToDate(hash) {
 		return res, nil
 	}
 
@@ -184,7 +209,8 @@ func (d *Dir) Sync(ctx context.Context, desired map[string]string, keep map[stri
 	if err := d.Bird.Configure(ctx); err != nil {
 		return nil, err
 	}
-	d.configured = true
+	res.ConfigChanged = d.configured && hash != d.configHash
+	d.configured, d.configHash = true, hash
 	res.Written = upserts
 	res.Deleted = deletes
 	res.Reloaded = true
@@ -206,12 +232,13 @@ func (d *Dir) Clear(ctx context.Context) (removed []string, err error) {
 		removed = append(removed, n)
 	}
 	sort.Strings(removed)
-	if len(removed) == 0 && d.configured {
+	hash := d.currentConfigHash()
+	if len(removed) == 0 && d.upToDate(hash) {
 		return nil, nil
 	}
 	if err := d.Bird.Configure(ctx); err != nil {
 		return removed, err
 	}
-	d.configured = true
+	d.configured, d.configHash = true, hash
 	return removed, nil
 }

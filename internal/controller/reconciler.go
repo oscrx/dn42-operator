@@ -129,14 +129,17 @@ func (r *Reconciler) Trigger() {
 
 func metaFor(ns, name string) metav1.ObjectMeta { return metav1.ObjectMeta{Namespace: ns, Name: name} }
 
-// Reconcile runs one pass and schedules the next full pass in 60s.
+// Reconcile runs one pass and schedules the next full pass in 60s (10s
+// after a failed pass).
 func (r *Reconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	err := r.Pass(ctx)
 	if err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "pass failed, nothing more changed")
+		// Retried on a short timer, not with backoff, so an API outage
+		// doesn't spin and BIRD starting after the operator is picked up
+		// quickly.
+		return reconcile.Result{RequeueAfter: 10 * time.Second}, nil
 	}
-	// Errors are logged and retried on the timer, not with backoff, so an
-	// API outage doesn't spin.
 	return reconcile.Result{RequeueAfter: 60 * time.Second}, nil
 }
 
@@ -421,6 +424,9 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 				pr.valid, pr.validReason, pr.validMsg = false, peer.ReasonBIRDRejected, rerr.Error()
 			}
 			log.Error(rerr, "bird rejected peer config, kept the old one", "peer", name)
+		}
+		if sres.ConfigChanged {
+			log.Info("bird.conf changed, bird reconfigured")
 		}
 		if len(sres.Written)+len(sres.Deleted) > 0 {
 			log.Info("bird reconfigured", "written", sres.Written, "deleted", sres.Deleted)

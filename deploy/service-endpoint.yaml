@@ -15,7 +15,7 @@ spec:
   ipFamilies: [IPv6]
   ipFamilyPolicy: SingleStack
   selector:
-    app.kubernetes.io/name: dn42-router
+    app.kubernetes.io/name: dn42-operator
     dn42.oscarr.nl/leader: "true" # set by the operator on the leader's pod only
   ports:
     - name: placeholder

@@ -46,6 +46,7 @@ func main() {
 		sharedKey       = flag.String("shared-key", "autopeer", "key in the Secret for peers without keyRef")
 		vrf             = flag.String("vrf", "vrf-dn42", "VRF the links go into (must exist)")
 		birdSocket      = flag.String("bird-socket", "/run/bird/bird.ctl", "BIRD control socket")
+		birdConfig      = flag.String("bird-config", "", "BIRD's main config; a change triggers configure (not a restart); empty: not watched")
 		peersDir        = flag.String("peers-dir", "/etc/bird/peers", "directory bird.conf includes peer snippets from")
 		birdTemplate    = flag.String("bird-template", "dnpeers", "BIRD bgp template the peers use")
 		service         = flag.String("endpoint-service", "", "Service whose spec.ports the operator sets (empty: none)")
@@ -67,7 +68,7 @@ func main() {
 	if err := run(runConfig{
 		namespace: *namespace, identity: *identity, leaseName: *leaseName,
 		keySecret: *keySecret, sharedKey: *sharedKey, vrf: *vrf,
-		birdSocket: *birdSocket, peersDir: *peersDir, birdTemplate: *birdTemplate,
+		birdSocket: *birdSocket, peersDir: *peersDir, birdConfig: *birdConfig, birdTemplate: *birdTemplate,
 		service: *service, controlCM: *controlCM, maxDeleteFrac: *maxDeleteFrac,
 		metricsAddr: *metricsAddr, probeAddr: *probeAddr,
 		cleanupShutdown: *cleanupShutdown, statusInterval: *statusInterval,
@@ -81,6 +82,7 @@ func main() {
 type runConfig struct {
 	namespace, identity, leaseName, keySecret, sharedKey, vrf string
 	birdSocket, peersDir, birdTemplate, service, controlCM    string
+	birdConfig                                                string
 	maxDeleteFrac                                             float64
 	metricsAddr, probeAddr                                    string
 	cleanupShutdown                                           bool
@@ -145,7 +147,7 @@ func run(c runConfig) error {
 		ControlConfigMap:  c.controlCM,
 		MaxDeleteFraction: c.maxDeleteFrac,
 		NetDev:            netdev.NewLinux(),
-		Dir:               &bird.Dir{Path: c.peersDir, Bird: birdClient},
+		Dir:               &bird.Dir{Path: c.peersDir, Bird: birdClient, ConfigFile: c.birdConfig},
 		Bird:              birdClient,
 		Renderer:          bird.Renderer{Template: c.birdTemplate},
 		Resolve:           ourctrl.DefaultResolver,

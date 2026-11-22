@@ -1,0 +1,102 @@
+# Example only; the real manifests live in uber-kubernetes.
+#
+# BIRD and the operator are two DaemonSets on the router nodes, not two
+# containers in one pod: updating the operator (or its image) must never
+# restart BIRD, because peers and the route collector back off after every
+# BIRD restart. They share two host paths:
+#   /var/run/bird               BIRD's control socket (also used by the looking glass and bird_exporter)
+#   /var/lib/dn42-router/peers  the peer snippets bird.conf includes
+# bird.conf is a ConfigMap with a fixed name, mounted as a directory (no
+# subPath) so edits reach the running pods; the operator notices the change
+# and runs "configure check" + "configure" instead of restarting BIRD.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dn42-bird
+  namespace: dn42
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: dn42-bird}
+  updateStrategy:
+    type: OnDelete # never restart BIRD on a manifest change; delete the pod when you mean it
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dn42-bird}
+    spec:
+      nodeSelector: {dn42.oscarr.nl/router: "true"}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: bird
+          image: ghcr.io/oscrx/bird2:0.1.0 # images/bird, released with the operator (BIRD 2.17)
+          command: [bird, -f, -c, /etc/bird/conf/bird.conf, -s, /var/run/bird/bird.ctl]
+          securityContext: {privileged: true}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+          volumeMounts:
+            - {name: conf, mountPath: /etc/bird/conf, readOnly: true}
+            - {name: peers, mountPath: /etc/bird/peers, readOnly: true}
+            - {name: run, mountPath: /var/run/bird}
+      volumes:
+        - {name: conf, configMap: {name: dn42-bird-conf}}
+        - {name: peers, hostPath: {path: /var/lib/dn42-router/peers, type: DirectoryOrCreate}}
+        - {name: run, hostPath: {path: /var/run/bird, type: DirectoryOrCreate}}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dn42-operator
+  namespace: dn42
+spec:
+  selector:
+    matchLabels: {app.kubernetes.io/name: dn42-operator}
+  updateStrategy:
+    rollingUpdate: {maxUnavailable: 1}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: dn42-operator}
+    spec:
+      serviceAccountName: dn42-operator
+      nodeSelector: {dn42.oscarr.nl/router: "true"}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: operator
+          image: ghcr.io/oscrx/dn42-operator:0.1.0
+          args:
+            - --key-secret=dn42-wireguard-keys
+            - --vrf=vrf-dn42
+            - --bird-socket=/var/run/bird/bird.ctl
+            - --bird-config=/etc/bird/conf/bird.conf
+            - --peers-dir=/etc/bird/peers
+            - --metrics-bind-address=:9842
+            - --health-probe-bind-address=:9843
+            # - --endpoint-service=dn42-endpoint   # once the floating endpoint exists
+          env:
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}} # leader label on its own pod
+          securityContext: {privileged: true} # netlink, wireguard, /proc/sys in the host netns
+          ports:
+            - {name: metrics, containerPort: 9842}
+          # Ready = healthy in its role with the leader label confirmed; the
+          # endpoint Service selects dn42.oscarr.nl/leader=true.
+          readinessProbe:
+            httpGet: {path: /readyz, port: 9843}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: 9843}
+            periodSeconds: 20
+          resources:
+            requests: {cpu: 20m, memory: 64Mi}
+          volumeMounts:
+            - {name: conf, mountPath: /etc/bird/conf, readOnly: true}
+            - {name: peers, mountPath: /etc/bird/peers}
+            - {name: run, mountPath: /var/run/bird}
+      volumes:
+        - {name: conf, configMap: {name: dn42-bird-conf}}
+        - {name: peers, hostPath: {path: /var/lib/dn42-router/peers, type: DirectoryOrCreate}}
+        - {name: run, hostPath: {path: /var/run/bird, type: DirectoryOrCreate}}

@@ -117,6 +117,8 @@ pass every 60s. Status and metrics are written every 30s.
   confirm, set `confirmDeletions: "<count>"` in the ConfigMap
   `dn42-operator-control`. It must equal the number of pending deletions, and
   the next pass then goes ahead. Remove the key afterwards.
+- BIRD is reconfigured, never restarted, by the operator: peer changes and
+  bird.conf changes both go through `configure check` and `configure`.
 - Nothing free-form reaches BIRD: names match a strict pattern, and the ASN,
   link values and neighbor address are an integer, integers and a
   `netip.Addr`. BIRD protocols are named `peer_<name>`, so a peer name can't
@@ -132,8 +134,13 @@ pass every 60s. Status and metrics are written every 30s.
   Secret, patch the one Service, read the control ConfigMap, get/list/patch
   pods (the leader label; pod names are generated, so no resourceNames), and
   the Lease.
-- `daemonset.yaml`: nodes labelled `dn42.oscarr.nl/router=true`, host network,
-  privileged. It has two containers:
+- `router.yaml`: two DaemonSets on nodes labelled `dn42.oscarr.nl/router=true`,
+  host network, privileged. BIRD and the operator are separate pods so an
+  operator update never restarts BIRD; `dn42-bird` uses `OnDelete`. They
+  share `/var/run/bird` (socket) and `/var/lib/dn42-router/peers` (snippets)
+  on the host. bird.conf is a fixed-name ConfigMap mounted as a directory,
+  and `--bird-config` makes the operator `configure` BIRD when it changes.
+  Earlier layout, for reference: one pod with two containers:
   - `bird`, with a static `bird.conf` that includes `/etc/bird/peers/*.conf`
     and defines the `dnpeers` template and `dn42_import`/`dn42_export(lat, bw, crypto)`
   - `operator`

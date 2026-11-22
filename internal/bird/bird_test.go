@@ -291,3 +291,30 @@ func TestDirSyncBaselineBroken(t *testing.T) {
 		t.Error("reloaded a broken config")
 	}
 }
+
+func TestDirReconfiguresOnConfigChange(t *testing.T) {
+	path := t.TempDir()
+	conf := filepath.Join(t.TempDir(), "bird.conf")
+	os.WriteFile(conf, []byte("router id 1.2.3.4;\n"), 0o644)
+	ctl := &fakeCtl{dir: path}
+	d := &Dir{Path: path, Bird: ctl, ConfigFile: conf}
+	ctx := context.Background()
+	if _, err := d.Sync(ctx, map[string]string{"a": "A"}, nil); err != nil || ctl.configures != 1 {
+		t.Fatalf("first: %d %v", ctl.configures, err)
+	}
+	d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if ctl.configures != 1 {
+		t.Error("reconfigured without a change")
+	}
+	// bird.conf changes (ConfigMap update): checked, then configured.
+	os.WriteFile(conf, []byte("router id 1.2.3.5;\n"), 0o644)
+	checks := ctl.checks
+	res, err := d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if err != nil || !res.Reloaded || !res.ConfigChanged || ctl.configures != 2 || ctl.checks == checks {
+		t.Errorf("after bird.conf change: reloaded=%v configures=%d err=%v", res.Reloaded, ctl.configures, err)
+	}
+	d.Sync(ctx, map[string]string{"a": "A"}, nil)
+	if ctl.configures != 2 {
+		t.Error("reconfigured again without a change")
+	}
+}

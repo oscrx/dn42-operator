@@ -70,24 +70,40 @@ consistent() {
 }
 report() { log "leader=$(leader) endpoints=[$(endpoints)] links: $A=[$(links $A)] $B=[$(links $B)]"; }
 
-waitfor 180 "rollout" K -n dn42 rollout status ds/dn42-router --timeout=5s
+waitfor 180 "bird pods" sh -c "[ \"\$(docker exec $S kubectl -n dn42 get pods -l app.kubernetes.io/name=dn42-bird -o jsonpath='{range .items[*]}{.status.phase} {end}')\" = 'Running Running ' ]"
+waitfor 180 "rollout" K -n dn42 rollout status ds/dn42-operator --timeout=5s
 waitfor 60 "consistent state" consistent $A $B
 report
-ready=$(K -n dn42 get pods -l app.kubernetes.io/name=dn42-router -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{" "}{end}')
+ready=$(K -n dn42 get pods -l app.kubernetes.io/name=dn42-operator -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{" "}{end}')
 [ "$ready" = "True True " ] || fail "both pods should be Ready (leader and follower): $ready"
 log "OK: both pods Ready, only the leader is an endpoint"
 
-log "rolling update"
-K -n dn42 rollout restart ds/dn42-router >/dev/null
-K -n dn42 rollout status ds/dn42-router --timeout=180s || fail "rolling update stalled"
+birdpods() { K -n dn42 get pods -l app.kubernetes.io/name=dn42-bird -o jsonpath='{range .items[*]}{.metadata.uid}/{.status.containerStatuses[0].restartCount} {end}'; }
+BIRD0=$(birdpods)
+log "rolling update of the operator"
+K -n dn42 rollout restart ds/dn42-operator >/dev/null
+K -n dn42 rollout status ds/dn42-operator --timeout=180s || fail "rolling update stalled"
 waitfor 60 "consistent state after rollout" consistent $A $B
 report
-log "OK: rolling update completed"
+[ "$(birdpods)" = "$BIRD0" ] || fail "BIRD pods were restarted by the operator rollout: $BIRD0 -> $(birdpods)"
+log "OK: rolling update completed, BIRD not restarted"
+
+log "bird.conf change: reconfigured, not restarted"
+L=$(leader)
+lastreconf() { K -n dn42 exec "$(K -n dn42 get pods -l app.kubernetes.io/name=dn42-bird --field-selector spec.nodeName=$L -o name)" -- \
+  birdc -s /var/run/bird/bird.ctl show status | grep 'Last reconfiguration'; }
+R0=$(lastreconf)
+sleep 1
+K -n dn42 get configmap dn42-bird-conf -o yaml | sed 's/scan time 2;/scan time 3;/' | K apply -f - >/dev/null
+waitfor 150 "operator saw the bird.conf change" sh -c "docker exec $S kubectl -n dn42 logs -l app.kubernetes.io/name=dn42-operator --tail=-1 | grep -q 'bird.conf changed'"
+[ "$(lastreconf)" != "$R0" ] || fail "BIRD was not reconfigured ($R0)"
+[ "$(birdpods)" = "$BIRD0" ] || fail "BIRD restarted on a bird.conf change"
+log "OK: bird.conf change applied without a BIRD restart"
 
 L=$(leader); F=$A; [ "$L" = "$A" ] && F=$B
-restarts() { K -n dn42 get pods -l app.kubernetes.io/name=dn42-router --field-selector spec.nodeName=$1 \
+restarts() { K -n dn42 get pods -l app.kubernetes.io/name=dn42-operator --field-selector spec.nodeName=$1 \
   -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="operator")].restartCount}'; }
-podready() { K -n dn42 get pods -l app.kubernetes.io/name=dn42-router --field-selector spec.nodeName=$1 \
+podready() { K -n dn42 get pods -l app.kubernetes.io/name=dn42-operator --field-selector spec.nodeName=$1 \
   -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' | grep -q True; }
 R0=$(restarts "$L")
 log "failover: stopping leader node $L"
@@ -99,7 +115,7 @@ report
 
 log "bringing $L back"
 docker start "$L" >/dev/null
-waitfor 180 "operator on $L restarted" sh -c "[ \"\$(docker exec $S kubectl -n dn42 get pods -l app.kubernetes.io/name=dn42-router --field-selector spec.nodeName=$L -o jsonpath='{.items[0].status.containerStatuses[?(@.name==\"operator\")].restartCount}')\" -gt $R0 ]"
+waitfor 180 "operator on $L restarted" sh -c "[ \"\$(docker exec $S kubectl -n dn42 get pods -l app.kubernetes.io/name=dn42-operator --field-selector spec.nodeName=$L -o jsonpath='{.items[0].status.containerStatuses[?(@.name==\"operator\")].restartCount}')\" -gt $R0 ]"
 waitfor 120 "$L pod Ready again" podready "$L"
 waitfor 60 "consistent with both nodes" consistent $A $B
 [ "$(leader)" = "$F" ] || fail "leadership moved back to $L"
