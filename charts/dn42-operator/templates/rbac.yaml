@@ -1,17 +1,19 @@
-# Least privilege: the peers, their status, one Secret, one Service, one
-# ConfigMap, the router pods' leader label and the Lease, all in the dn42
-# namespace.
+# Least privilege in the release namespace; nothing cluster-wide.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: dn42-operator
-  namespace: dn42
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: dn42-operator
-  namespace: dn42
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
 rules:
   - apiGroups: [dn42.oscarr.nl]
     resources: [dn42peers]
@@ -22,18 +24,22 @@ rules:
   # The key Secret only (watched with a metadata.name field selector).
   - apiGroups: [""]
     resources: [secrets]
-    resourceNames: [dn42-wireguard-keys]
+    resourceNames: [{{ .Values.operator.keySecret }}]
     verbs: [get, list, watch]
+  {{- with .Values.operator.endpointService }}
   # spec.ports of the floating endpoint Service, via server-side apply.
   - apiGroups: [""]
     resources: [services]
-    resourceNames: [dn42-endpoint]
+    resourceNames: [{{ . }}]
     verbs: [get, patch]
-  # Confirmation for a blocked mass deletion.
+  {{- end }}
+  {{- with .Values.operator.controlConfigMap }}
+  # standDown and the confirmation for a blocked mass deletion.
   - apiGroups: [""]
     resources: [configmaps]
-    resourceNames: [dn42-operator-control]
+    resourceNames: [{{ . }}]
     verbs: [get]
+  {{- end }}
   # The leader label on the router pods (own pod, and clearing a stale
   # leader). Pod names are generated, so this can't use resourceNames.
   - apiGroups: [""]
@@ -51,7 +57,9 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: dn42-operator
-  namespace: dn42
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -59,4 +67,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: dn42-operator
-    namespace: dn42
+    namespace: {{ .Release.Namespace }}

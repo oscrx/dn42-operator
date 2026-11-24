@@ -49,6 +49,15 @@
       "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)(?:\\.(?<patch>\\d+))?$"
     },
     {
+      "description": "The BIRD image the chart deploys (tag = BIRD version, plus digest). Published by bird-image.yaml after an images/bird change.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^charts/dn42-operator/values\\.yaml$/"],
+      "matchStrings": [
+        "repository: (?<depName>ghcr\\.io/oscrx/bird2)\\s+(?:#.*\\s+)*tag: \"(?<currentValue>[^\"]+)\"\\s+digest: \"(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
       "description": "make lint pins the same golangci-lint as ci.yaml.",
       "customType": "regex",
       "managerFilePatterns": ["/^Makefile$/"],
@@ -66,6 +75,12 @@
     }
   ],
   "packageRules": [
+    {
+      "description": "The chart's images: helm-values would write digests into the tag fields. The BIRD image has its own manager (tag + digest), and the operator image digest is set by the release workflow.",
+      "matchManagers": ["helm-values"],
+      "matchFileNames": ["charts/**"],
+      "enabled": false
+    },
     {
       "description": "The go.mod toolchain is what CI tests with and the golang image is what the images compile with (two Dockerfiles), so they move in one PR. make toolchain.verify fails the PR until all have landed in it.",
       "groupName": "go",
@@ -99,6 +114,12 @@
       "matchPackageNames": ["labs/bird"],
       "allowedVersions": "/^v2\\./",
       "separateMinorPatch": true,
+      "automerge": false,
+      "labels": ["bird"]
+    },
+    {
+      "description": "The BIRD image the chart deploys. Never automerged: every BGP session restarts when the dn42-bird pods are next deleted (OnDelete), so a new BIRD or rebuild is reviewed.",
+      "matchPackageNames": ["ghcr.io/oscrx/bird2"],
       "automerge": false,
       "labels": ["bird"]
     },

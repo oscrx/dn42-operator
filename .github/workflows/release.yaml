@@ -143,11 +143,115 @@ jobs:
             echo "Digest: \`${DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+  # Second stage: the chart pins the operator image by digest, which exists
+  # only once the image is pushed. Failing here leaves a published image with
+  # no chart, which a re-run fixes; the reverse would not be recoverable.
+  chart:
+    name: Package and push the chart
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Needed for cosign keyless signing via the GitHub OIDC provider.
+      id-token: write
+    # Only on tags: a chart version has to correspond to a release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      # cosign reads ~/.docker/config.json; `helm registry login` writes
+      # helm's own config, so both are needed.
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pinned to an exact release: this action publishes no floating major
+      # tag, so @v4 does not resolve.
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      # The image job is a matrix, so its digest is looked up from the tag it
+      # just pushed (and checked against its signature) rather than passed on.
+      # Written into the working copy only: the repository keeps it empty.
+      - name: Pin the published operator image digest into the chart
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/dn42-operator
+          REPO: ${{ github.repository }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          digest=$(docker buildx imagetools inspect "${IMAGE}:${version}" --format '{{json .Manifest}}' | jq -r .digest)
+          test -n "$digest"
+          cosign verify "${IMAGE}@${digest}" \
+            --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yaml@${GITHUB_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+          values=charts/dn42-operator/values.yaml
+          # Only the operator's digest is empty; the BIRD image's is pinned.
+          sed -i "s|^    digest: \"\"$|    digest: \"${digest}\"|" "$values"
+          grep -q "^    digest: \"${digest}\"$" "$values"
+          helm template t charts/dn42-operator | grep -F "dn42-operator@${digest}"
+          echo "IMAGE_DIGEST=${digest}" >> "$GITHUB_ENV"
+
+      - name: Package and push the chart
+        id: chart
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          declared=$(helm show chart charts/dn42-operator | awk '$1=="version:"{print $2}')
+          if [ "$declared" != "$version" ]; then
+            echo "Chart.yaml version ($declared) does not match the tag ($version); bump the chart before tagging."
+            exit 1
+          fi
+
+          helm registry login ghcr.io -u "$ACTOR" --password-stdin <<<"$GH_TOKEN"
+          helm package charts/dn42-operator --destination dist
+          helm push "dist/dn42-operator-${version}.tgz" \
+            "oci://ghcr.io/${OWNER}/charts" 2>&1 | tee push.log
+
+          digest=$(grep -oE 'sha256:[a-f0-9]{64}' push.log | head -1)
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/${OWNER}/charts/dn42-operator" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the chart
+        env:
+          REF: ${{ steps.chart.outputs.ref }}
+          DIGEST: ${{ steps.chart.outputs.digest }}
+        run: cosign sign --yes "${REF}@${DIGEST}"
+
+      - name: Summary
+        env:
+          CHART_REF: ${{ steps.chart.outputs.ref }}
+          CHART_VERSION: ${{ steps.chart.outputs.version }}
+          CHART_DIGEST: ${{ steps.chart.outputs.digest }}
+        run: |
+          {
+            echo "### Chart"
+            echo
+            echo '```'
+            echo "helm template dn42 oci://${CHART_REF} --version ${CHART_VERSION}"
+            echo '```'
+            echo
+            echo "Digest: \`${CHART_DIGEST}\`"
+            echo
+            echo "Pins dn42-operator image digest \`${IMAGE_DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   # Last, so a release page only appears once everything it points at exists.
   # The tag is also what the peers repo's gate installs (peercheck@<tag>).
   github-release:
     name: Create the GitHub release
-    needs: image
+    needs: [image, chart]
     runs-on: ubuntu-latest
     permissions:
       contents: write

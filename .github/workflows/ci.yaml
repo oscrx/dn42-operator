@@ -173,9 +173,11 @@ jobs:
           kubeconform -v
 
       - name: Validate
-        # Built-in kinds strictly; DN42Peer (our own CRD) isn't in any schema
-        # catalogue, so it is skipped here and exercised by the integration and
-        # k3s tests instead. The autopeer config is not a Kubernetes object.
+        # The examples in deploy/ and the k3s test's extra objects; the chart
+        # has its own job. Built-in kinds strictly; DN42Peer (our own CRD)
+        # isn't in any schema catalogue, so it is skipped here and exercised by
+        # the integration and k3s tests instead. The autopeer config is not a
+        # Kubernetes object.
         run: |
           kubeconform \
             -strict \
@@ -183,7 +185,68 @@ jobs:
             -ignore-missing-schemas \
             -ignore-filename-pattern 'autopeer-config' \
             -schema-location default \
-            deploy/ config/crd/ test/k3s/
+            deploy/ test/k3s/extra.yaml
+
+  chart:
+    name: Chart
+    runs-on: ubuntu-latest
+    env:
+      K8S_SCHEMAS: https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/{{.NormalizedKubernetesVersion}}/{{.ResourceKind}}{{.KindSuffix}}.json
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
+
+      - name: Install kubeconform
+        run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+
+      - name: Lint
+        run: helm lint charts/dn42-operator
+
+      # The default (standalone-strict) schemas have no CustomResourceDefinition
+      # (its schema references itself, so it can't be inlined); the plain
+      # schemas do, so the generated CRD is validated too.
+      - name: Render and validate the default values
+        run: |
+          helm template t charts/dn42-operator --include-crds \
+            | kubeconform -strict -summary -schema-location default -schema-location "$K8S_SCHEMAS" -
+
+      - name: Render and validate with every optional feature enabled
+        run: |
+          helm template t charts/dn42-operator --include-crds \
+            --set operator.endpointService=dn42-endpoint \
+            --set operator.cleanupOnShutdown=false --set operator.teardownOnLeaseLoss=false \
+            --set bird.config.create=true --set bird.config.content='include "/etc/bird/peers/*.conf";' \
+            --set operator.extraArgs[0]=--status-interval=10s \
+            -f test/k3s/values.yaml \
+            | kubeconform -strict -summary -schema-location default -schema-location "$K8S_SCHEMAS" -
+
+      - name: Guards reject invalid configurations
+        # The chart fails fast on values that would misbehave at runtime.
+        # Assert they still do, so a template refactor cannot quietly drop them.
+        run: |
+          set +e
+          for args in \
+            "--set bird.config.create=true" \
+            "--set bird.config.content=x" \
+            "--set bird.image.tag=" \
+            "--set operator.keySecret=" \
+            "--set bird.config.configMapName="
+          do
+            # shellcheck disable=SC2086
+            if helm template t charts/dn42-operator $args >/dev/null 2>&1; then
+              echo "guard did not fire for: $args"
+              exit 1
+            fi
+            echo "guard fired for: $args"
+          done
 
   integration:
     name: Integration (VRF, WireGuard, BIRD)
@@ -224,6 +287,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq "linux-modules-extra-$(uname -r)" || echo "no linux-modules-extra for $(uname -r)"
           sudo modprobe -a wireguard vrf
+
+      # The test renders the chart with helm template.
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5
 
       - name: k3s test
         run: make k3s-test

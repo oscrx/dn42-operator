@@ -45,14 +45,20 @@ for n in $A $B; do
 done
 K label node $A $B dn42.oscarr.nl/router=true >/dev/null
 
-log "deploying"
-K apply -f - < config/crd/dn42.oscarr.nl_dn42peers.yaml >/dev/null
-K wait --for=condition=Established crd/dn42peers.dn42.oscarr.nl >/dev/null
-K apply -f - < deploy/namespace.yaml >/dev/null
-K apply -f - < deploy/rbac.yaml >/dev/null
+log "deploying the chart"
+K create namespace dn42 >/dev/null
+K label namespace dn42 pod-security.kubernetes.io/enforce=privileged >/dev/null
 K -n dn42 create secret generic dn42-wireguard-keys \
   --from-literal=autopeer="$(docker run --rm --entrypoint sh "$BIRD_IMG" -c 'head -c32 /dev/urandom | base64')" >/dev/null
-sed -e "s#OPERATOR_IMG#$IMG#" -e "s#BIRD_IMG#$BIRD_IMG#" test/k3s/router.yaml | K apply -f - >/dev/null
+# helm runs here, not in the cluster: the test renders the chart exactly as
+# ArgoCD does (helm template, CRDs included) and applies the result.
+helm template dn42 charts/dn42-operator --namespace dn42 --include-crds \
+  -f test/k3s/values.yaml \
+  --set operator.image.repository="${IMG%:*}" --set operator.image.tag="${IMG##*:}" \
+  --set bird.image.repository="${BIRD_IMG%:*}" --set bird.image.tag="${BIRD_IMG##*:}" \
+  | K apply -f - >/dev/null
+K wait --for=condition=Established crd/dn42peers.dn42.oscarr.nl >/dev/null
+K apply -f - < test/k3s/extra.yaml >/dev/null
 
 leader() { K -n dn42 get lease dn42-operator -o jsonpath='{.spec.holderIdentity}' 2>/dev/null; }
 endpoints() { # ready endpoints of the Service as node names

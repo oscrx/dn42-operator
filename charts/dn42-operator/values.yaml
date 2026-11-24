@@ -1,0 +1,96 @@
+# Both DaemonSets run on these nodes only. Label the router node(s) to start
+# the router; with no labelled node everything stays idle.
+nodeSelector:
+  dn42.oscarr.nl/router: "true"
+tolerations: []
+
+imagePullSecrets: []
+
+operator:
+  image:
+    repository: ghcr.io/oscrx/dn42-operator
+    # Defaults to the chart's appVersion when empty.
+    tag: ""
+    # Set by the release workflow to the digest of the image published for
+    # this chart version, and takes precedence over tag. Empty in the
+    # repository because the digest does not exist until the image is pushed.
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  # VRF the WireGuard links go into. It must exist on the node (the operator
+  # never creates it).
+  vrf: vrf-dn42
+  # Secret with the WireGuard private keys (one key per keyRef). Not created
+  # by the chart: keep it in a SealedSecret or similar.
+  keySecret: dn42-wireguard-keys
+  # Key in keySecret for peers without keyRef.
+  sharedKey: autopeer
+  # BIRD bgp template the rendered peer snippets use (defined in bird.conf).
+  birdTemplate: dnpeers
+  # Service whose spec.ports the operator manages (the floating endpoint).
+  # Not created by the chart. Empty: none, and no RBAC for it.
+  endpointService: ""
+  # ConfigMap with standDown / mass-deletion confirmation. Not created by
+  # the chart; the operator only reads it. Empty: none.
+  controlConfigMap: dn42-operator-control
+
+  # Remove managed links before releasing the lease on shutdown, and as soon
+  # as the lease can't be renewed. Both are needed with a standby node (a
+  # tunnel key must never be live on two nodes). On a single router set both
+  # false, so operator restarts and API outages keep the tunnels up.
+  cleanupOnShutdown: true
+  teardownOnLeaseLoss: true
+
+  # Host network: the ports are opened on the node, bound to the node's
+  # address only.
+  metricsPort: 9842
+  healthProbePort: 9843
+
+  # Extra CLI arguments, appended last.
+  extraArgs: []
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+  podAnnotations: {}
+  podLabels: {}
+
+bird:
+  image:
+    repository: ghcr.io/oscrx/bird2
+    # The BIRD version (ghcr.io/oscrx/bird2 follows BIRD, not this chart).
+    # Renovate keeps tag and digest current.
+    tag: "2.20.0"
+    digest: "sha256:53a4693a592e707f9dbb69163da01a75b5ea0f22fe6e50b3a05dae76573b9b7a"
+    pullPolicy: IfNotPresent
+
+  # bird.conf, from the bird.conf key of a ConfigMap. It must define the
+  # birdTemplate bgp template and include "/etc/bird/peers/*.conf". BIRD
+  # seeds its live copy from it on first start; after that the operator
+  # copies new versions in only after "configure check" accepts them, then
+  # runs "configure" (never a restart). Keep the name fixed (not hashed), so
+  # a change reaches the running pods instead of rolling them.
+  config:
+    configMapName: dn42-bird-conf
+    # true: the chart creates the ConfigMap from content. false: you provide it.
+    create: false
+    content: ""
+
+  # Extra init containers for the BIRD pod (e.g. creating the VRF where the
+  # node OS doesn't). Rendered with tpl, so they can use the chart's helpers
+  # (e.g. image: '{{ include "dn42-operator.birdImage" . }}').
+  extraInitContainers: []
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+  podAnnotations: {}
+  podLabels: {}
+
+# Host paths both DaemonSets share.
+hostPaths:
+  # BIRD's control socket; also where a looking glass / bird_exporter reads it.
+  socketDir: /var/run/dn42-bird
+  # Peer snippets the operator renders and bird.conf includes.
+  peersDir: /var/lib/dn42-router/peers
+  # The bird.conf BIRD loads (the live, checked copy).
+  configDir: /var/lib/dn42-router/conf
+
+# Extra manifests, rendered with tpl.
+extraObjects: []

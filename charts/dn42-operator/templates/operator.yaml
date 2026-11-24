@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dn42-operator
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dn42-operator
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  updateStrategy:
+    rollingUpdate: {maxUnavailable: 1}
+  template:
+    metadata:
+      labels:
+        # The endpoint Service selects app.kubernetes.io/name=dn42-operator
+        # plus the leader label the operator sets on its own pod.
+        app.kubernetes.io/name: dn42-operator
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- with .Values.operator.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.operator.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: dn42-operator
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: operator
+          image: {{ include "dn42-operator.image" . | quote }}
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          args:
+            - --key-secret={{ .Values.operator.keySecret }}
+            - --shared-key={{ .Values.operator.sharedKey }}
+            - --vrf={{ .Values.operator.vrf }}
+            - --bird-socket=/var/run/dn42-bird/bird.ctl
+            - --bird-config=/etc/bird/live/bird.conf
+            - --bird-config-source=/etc/bird/conf/bird.conf
+            - --peers-dir=/etc/bird/peers
+            - --bird-template={{ .Values.operator.birdTemplate }}
+            - --endpoint-service={{ .Values.operator.endpointService }}
+            - --control-configmap={{ .Values.operator.controlConfigMap }}
+            # Host network: bind to the node address only, not every address.
+            - --metrics-bind-address=[$(HOST_IP)]:{{ .Values.operator.metricsPort }}
+            - --health-probe-bind-address=[$(HOST_IP)]:{{ .Values.operator.healthProbePort }}
+            - --cleanup-on-shutdown={{ .Values.operator.cleanupOnShutdown }}
+            - --teardown-on-lease-loss={{ .Values.operator.teardownOnLeaseLoss }}
+            {{- range .Values.operator.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: POD_NAMESPACE, valueFrom: {fieldRef: {fieldPath: metadata.namespace}}}
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}} # leader label on its own pod
+            - {name: HOST_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+          securityContext: {privileged: true} # netlink, wireguard, /proc/sys in the host netns
+          ports:
+            - {name: metrics, containerPort: {{ .Values.operator.metricsPort }}}
+          # Ready = healthy in its role with the leader label confirmed.
+          readinessProbe:
+            httpGet: {path: /readyz, port: {{ .Values.operator.healthProbePort }}}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: {{ .Values.operator.healthProbePort }}}
+            periodSeconds: 20
+          {{- with .Values.operator.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - {name: conf, mountPath: /etc/bird/conf, readOnly: true}
+            - {name: live, mountPath: /etc/bird/live}
+            - {name: peers, mountPath: /etc/bird/peers}
+            - {name: run, mountPath: /var/run/dn42-bird}
+      volumes:
+        {{- include "dn42-operator.volumes" . | nindent 8 }}

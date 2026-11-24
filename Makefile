@@ -13,13 +13,13 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: generate
-generate: ## Regenerate deepcopy and the CRD (controller-gen)
+generate: ## Regenerate deepcopy and the chart's CRD (controller-gen)
 	$(CONTROLLER_GEN) object paths=./api/...
-	$(CONTROLLER_GEN) crd paths=./api/... output:crd:artifacts:config=config/crd
+	$(CONTROLLER_GEN) crd paths=./api/... output:crd:artifacts:config=charts/dn42-operator/crds
 
 .PHONY: generate.verify
 generate.verify: generate ## Fail if generated code is out of date
-	git diff --exit-code -- api config
+	git diff --exit-code -- api charts/dn42-operator/crds
 
 .PHONY: build
 build: ## Build all binaries for the host

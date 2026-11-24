@@ -1,0 +1,96 @@
+{{- include "dn42-operator.validate" . -}}
+{{- if .Values.bird.config.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  # Fixed name, not hashed: a new version must reach the running pods (the
+  # operator applies it with configure), never roll BIRD.
+  name: {{ include "dn42-operator.birdConfigMap" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
+data:
+  bird.conf: |
+    {{- .Values.bird.config.content | nindent 4 }}
+---
+{{- end }}
+# BIRD and the operator are separate DaemonSets: updating the operator never
+# restarts BIRD (peers and route collectors back off after a BIRD restart).
+# OnDelete: not even a BIRD image bump restarts it; delete the pod when you
+# mean it.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dn42-bird
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-operator.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dn42-bird
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dn42-bird
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        {{- with .Values.bird.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.bird.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      initContainers:
+        {{- with .Values.bird.extraInitContainers }}
+        {{- tpl (toYaml .) $ | nindent 8 }}
+        {{- end }}
+        # First start on a node: seed the live bird.conf from the ConfigMap.
+        # Later versions are copied by the operator, after configure check.
+        - name: seed-config
+          image: {{ include "dn42-operator.birdImage" . | quote }}
+          imagePullPolicy: {{ .Values.bird.image.pullPolicy }}
+          command: [sh, -c, "[ -s /etc/bird/live/bird.conf ] || cp /etc/bird/conf/bird.conf /etc/bird/live/bird.conf"]
+          volumeMounts:
+            - {name: conf, mountPath: /etc/bird/conf, readOnly: true}
+            - {name: live, mountPath: /etc/bird/live}
+      containers:
+        - name: bird
+          image: {{ include "dn42-operator.birdImage" . | quote }}
+          imagePullPolicy: {{ .Values.bird.image.pullPolicy }}
+          command: [bird, -f, -c, /etc/bird/live/bird.conf, -s, /var/run/dn42-bird/bird.ctl]
+          securityContext: {privileged: true}
+          # Signal only (nothing routes to this pod): BIRD answers its socket.
+          readinessProbe:
+            exec: {command: [birdc, -s, /var/run/dn42-bird/bird.ctl, show, status]}
+            periodSeconds: 15
+          {{- with .Values.bird.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - {name: live, mountPath: /etc/bird/live, readOnly: true}
+            - {name: peers, mountPath: /etc/bird/peers, readOnly: true}
+            - {name: run, mountPath: /var/run/dn42-bird}
+      volumes:
+        {{- include "dn42-operator.volumes" . | nindent 8 }}

@@ -21,9 +21,10 @@ flowchart LR
     trigger --> audit["<b>Audit workflows</b><br/>zizmor → SARIF"]
     trigger --> build["<b>Build images</b><br/>operator, autopeer, bird<br/>amd64 + arm64, no push"]
     trigger --> renovate["<b>Renovate config</b><br/>validator --strict"]
-    trigger --> manifests["<b>Manifests</b><br/>kubeconform on deploy/, config/crd/, test/k3s/"]
+    trigger --> manifests["<b>Manifests</b><br/>kubeconform on the deploy/ examples"]
+    trigger --> chart["<b>Chart</b><br/>helm lint, render + kubeconform,<br/>guards reject bad values"]
     trigger --> integration["<b>Integration</b><br/>privileged container: real VRF,<br/>WireGuard, BIRD, BGP Established"]
-    trigger -- "main / on demand" --> k3s["<b>k3s</b><br/>3-node cluster in Docker:<br/>rolling update, failover"]
+    trigger -- "main / on demand" --> k3s["<b>k3s</b><br/>the chart on a 3-node cluster in Docker:<br/>rolling update, failover"]
 ```
 
 ## Release
@@ -31,8 +32,10 @@ flowchart LR
 Runs on a `v*` tag, or by hand through `workflow_dispatch`. The tests run
 first, without any cache, so nothing a pull request could have written ends
 up in a signed image. The two images are built and signed in parallel.
-The GitHub release comes last, so its page only appears once everything it
-points to exists. The tag is also what the peers repo's gate installs
+The chart follows the operator image: its version must equal the tag, and
+the image digest is written into it before it is packaged, so a chart
+always points at the exact image of its release. The GitHub release comes
+last, so its page only appears once everything it points to exists. The tag is also what the peers repo's gate installs
 (`go install …/cmd/peercheck@<tag>`).
 
 ```mermaid
@@ -46,7 +49,8 @@ flowchart TD
     test["<b>Test</b><br/>go test -race, integration tests<br/>(no cache)"]
     test --> operator["<b>dn42-operator</b><br/>root, privileged on the router"]
     test --> autopeer["<b>dn42-autopeer</b><br/>nonroot, only the web app"]
-    operator & autopeer --> release["<b>GitHub release</b><br/>generated notes (tags only)"]
+    operator --> chart["<b>Chart</b><br/>operator digest pinned in,<br/>pushed to oci://ghcr.io/oscrx/charts, signed"]
+    operator & autopeer & chart --> release["<b>GitHub release</b><br/>generated notes (tags only)"]
 ```
 
 Each image is multi-arch, pushed to ghcr.io with SBOM and provenance, and
