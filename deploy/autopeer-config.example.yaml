@@ -76,18 +76,27 @@ providers:
       name: dn42.active_mnt
       asn: dn42.asn
 
-  # HExpNetwork WebAuth (AS4242420298). Registration and claims unknown.
+  # HExpNetwork WebAuth (AS4242420298), docs at
+  # https://auth42.hexpnet.work/doc.html (also https://auth.hexp.dn42),
+  # discovery checked 2026-11-24. The same Auth42 software as OAuth.dn42:
+  # pairwise sub (HMAC of the user and client ID), scope dn42 adds the dn42
+  # claim (asn, active_mnt, route, route6, mnt_by). Discovery lists no PKCE
+  # methods; autopeer sends S256 anyway. Accepts secret or public ("none")
+  # clients.
   - name: hexp
     displayName: HExpNetwork WebAuth
-    issuer: https://CHECK.hexp.example        # CHECK: everything
+    issuer: https://auth42.hexpnet.work
     clientID: CHECK
-    scopes: [openid]
+    clientSecretFile: /secrets/hexp-client-secret
+    scopes: [openid, dn42]
     claims:
-      asn: asn                                # CHECK
-      mntner: mnt                             # CHECK
+      subject: sub
+      name: dn42.active_mnt
+      asn: dn42.asn
 
   # Plain OAuth 2.0 without OIDC: the identity comes from the userinfo
-  # endpoint. (Auth42 turned out to be iEdon's OAuth.dn42, above.)
+  # endpoint. (No DN42 provider needs this today; "Auth42" is the software
+  # behind OAuth.dn42 and HExpNetwork WebAuth, both OIDC.)
   - name: plainoauth
     displayName: Some plain OAuth provider
     authURL: https://CHECK.burble.example/authorize   # CHECK

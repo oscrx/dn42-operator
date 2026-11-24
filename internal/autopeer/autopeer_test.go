@@ -351,7 +351,7 @@ func TestExampleConfigParses(t *testing.T) {
 	// The example has placeholder secrets and key; make them loadable.
 	s := strings.ReplaceAll(string(b), "REPLACE_WITH_SHARED_AUTOPEER_PUBLIC_KEY=", ourPub)
 	s = strings.ReplaceAll(s, "/secrets/", dir+"/")
-	for _, f := range []string{"kioubit-client-secret", "iedon-client-secret"} {
+	for _, f := range []string{"iedon-client-secret", "hexp-client-secret"} {
 		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o600); err != nil {
 			t.Fatal(err)
 		}
