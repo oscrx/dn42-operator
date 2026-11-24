@@ -62,10 +62,10 @@ signed with cosign (keyless). A manual dispatch only publishes the moving
 ## BIRD image
 
 `ghcr.io/oscrx/bird2` follows BIRD's version, not the operator's. BIRD is
-built from the upstream git repo at the `BIRD_TAG` in
+built from the upstream git repo (cloned from CZ-NIC's GitHub mirror) at the `BIRD_TAG` in
 [`images/bird/Dockerfile`](../images/bird/Dockerfile), and the build fails
 unless the tag is the pinned `BIRD_COMMIT`. Renovate bumps both together
-(`gitlab-tags` on gitlab.nic.cz, BIRD 2 only, never automerged); the merge
+(`github-tags` on CZ-NIC's GitHub mirror, BIRD 2 only, never automerged); the merge
 publishes the image.
 
 ```mermaid
