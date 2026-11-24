@@ -17,6 +17,19 @@ const (
 	// ConditionSessionEstablished is True when BIRD reports the BGP session
 	// as Established.
 	ConditionSessionEstablished = "SessionEstablished"
+	// ConditionTransitHealthy mirrors status.transit: False when TCP through
+	// the peer to the probe targets stalls after the handshake while it works
+	// over our other routes (typically a stateful firewall on the peer's side
+	// dropping our packets when the replies come back via another peer).
+	// Unknown until probed. Only set when the transit probe is enabled.
+	ConditionTransitHealthy = "TransitHealthy"
+)
+
+// Transit probe results, in TransitStatus.LastResult.
+const (
+	TransitHealthy      = "Healthy"
+	TransitBroken       = "Broken"
+	TransitInconclusive = "Inconclusive"
 )
 
 // LinkValues are the DN42 link communities of the tunnel
@@ -150,6 +163,35 @@ type DN42PeerStatus struct {
 	// LatencyMeasuredAt is when MeasuredLatency was measured.
 	// +optional
 	LatencyMeasuredAt *metav1.Time `json:"latencyMeasuredAt,omitempty"`
+
+	// Transit is the result of the transit probe, when it is enabled.
+	// +optional
+	Transit *TransitStatus `json:"transit,omitempty"`
+}
+
+// TransitStatus is what the transit probe found: TCP connections to a few
+// targets forced through this peer (replies return however the far end
+// routes to us), compared with the same targets over our normal routes.
+type TransitStatus struct {
+	// Healthy is the verdict BIRD gets (transit_ok in
+	// dn42_import_transit, with --bird-transit-arg). It changes only after
+	// two probes in a row agree; unset until then.
+	// +optional
+	Healthy *bool `json:"healthy,omitempty"`
+
+	// LastResult of the most recent probe: Healthy, Broken or Inconclusive
+	// (no target could be compared).
+	// +optional
+	// +kubebuilder:validation:Enum=Healthy;Broken;Inconclusive
+	LastResult string `json:"lastResult,omitempty"`
+
+	// Message describes the most recent probe per target.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// ProbedAt is when the most recent probe ran.
+	// +optional
+	ProbedAt *metav1.Time `json:"probedAt,omitempty"`
 }
 
 // DN42Peer is a DN42 peering: a WireGuard tunnel and a BGP session in BIRD.

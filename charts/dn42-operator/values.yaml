@@ -41,6 +41,20 @@ operator:
   cleanupOnShutdown: false
   teardownOnLeaseLoss: false
 
+  # Transit probe: finds peers whose firewall drops our TCP packets when the
+  # replies come back via another peer, and reports it in
+  # status.transit / the TransitHealthy condition (README, "Transit probe").
+  transitProbe:
+    # Our address in the VRF the probes connect from, e.g. the router's
+    # address on dn42-lo. Empty: no probe.
+    source: ""
+    # kind:[addr]:port,... (dns or http). Empty: the anycast resolver and
+    # wiki.
+    targets: ""
+    # Import with dn42_import_transit(latency, bandwidth, crypto, transit_ok)
+    # instead of dn42_import(...). Define that function in bird.conf first.
+    birdArg: false
+
   # Host network: the ports are opened on the node, bound to the node's
   # address only. Metrics name the peers and their state, so keep them
   # behind a firewall that blocks inbound traffic to the node.

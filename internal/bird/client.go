@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -251,4 +252,29 @@ func ParseProtocols(rep *Reply) map[string]ProtocolStatus {
 	}
 	flush()
 	return out
+}
+
+// HasRoute reports whether the protocol (a peer's BGP session) has a route
+// covering addr in BIRD's table.
+func (c *Client) HasRoute(ctx context.Context, protocol string, addr netip.Addr) (bool, error) {
+	if !ValidIdentifier(protocol) {
+		return false, fmt.Errorf("bird: protocol %q is not a plain identifier", protocol)
+	}
+	if !addr.IsValid() || addr.Zone() != "" {
+		return false, fmt.Errorf("bird: bad address %s", addr)
+	}
+	rep, err := c.Command(ctx, fmt.Sprintf("show route for %s protocol %s", addr, protocol))
+	if err != nil {
+		return false, err
+	}
+	if err := rep.Err(); err != nil {
+		return false, err
+	}
+	return HasRouteFrom(rep, protocol), nil
+}
+
+// HasRouteFrom reports whether a "show route" reply lists a route of the
+// protocol ("... unicast [peer_x 12:00:00] ...").
+func HasRouteFrom(rep *Reply, protocol string) bool {
+	return strings.Contains(rep.Text(), "["+protocol+" ")
 }

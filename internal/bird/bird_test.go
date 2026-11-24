@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/peer"
@@ -417,5 +418,52 @@ func TestDirSharedConfigFile(t *testing.T) {
 	}
 	if read(live) != "v2" {
 		t.Errorf("bird.conf copied while BIRD was down: %q", read(live))
+	}
+}
+
+func TestRenderTransitArg(t *testing.T) {
+	r := Renderer{Template: "dnpeers", TransitArg: true}
+	p := testPeer()
+	got, err := r.Render(p)
+	if err != nil || !strings.Contains(got, "import where dn42_import_transit(2, 24, 34, true);") ||
+		!strings.Contains(got, "export where dn42_export(2, 24, 34);") {
+		t.Fatalf("%v\n%s", err, got)
+	}
+	p.ApplyTransit(ptr(false))
+	if got, _ := r.Render(p); !strings.Contains(got, "dn42_import_transit(2, 24, 34, false);") {
+		t.Errorf("broken transit:\n%s", got)
+	}
+	p.ApplyTransit(nil)
+	if got, _ := r.Render(p); !strings.Contains(got, "dn42_import_transit(2, 24, 34, true);") {
+		t.Errorf("unknown transit must stay allowed:\n%s", got)
+	}
+	p.ApplyTransit(ptr(false))
+	if got, _ := (Renderer{Template: "dnpeers"}).Render(p); !strings.Contains(got, "dn42_import(2, 24, 34);") {
+		t.Errorf("without TransitArg the call keeps three arguments:\n%s", got)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestHasRoute(t *testing.T) {
+	sock := fakeBird(t, map[string]string{
+		"show route for fd42:d42:d42:53::1 protocol peer_baragoon": "1007-Table master6:\n" +
+			" fd42:d42:d42:53::/64 unicast [peer_baragoon 21:43:27.588] (100) [AS4242421080i]\n" +
+			" \tvia fe80::1732 on wg-baragoon\n0000 \n",
+		"show route for fd42:d42:d42:53::1 protocol peer_lare": "0000 \n",
+	})
+	c := &Client{Socket: sock, Timeout: 5 * time.Second}
+	addr := netip.MustParseAddr("fd42:d42:d42:53::1")
+	if ok, err := c.HasRoute(context.Background(), "peer_baragoon", addr); err != nil || !ok {
+		t.Errorf("baragoon: %v %v", ok, err)
+	}
+	if ok, err := c.HasRoute(context.Background(), "peer_lare", addr); err != nil || ok {
+		t.Errorf("lare: %v %v", ok, err)
+	}
+	if _, err := c.HasRoute(context.Background(), "peer_x; down", addr); err == nil {
+		t.Error("bad protocol name sent")
+	}
+	if _, err := c.HasRoute(context.Background(), "peer_unknown", addr); err == nil {
+		t.Error("parse error not reported")
 	}
 }

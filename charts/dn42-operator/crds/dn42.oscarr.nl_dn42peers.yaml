@@ -301,6 +301,33 @@ spec:
                   this peer.
                 format: int64
                 type: integer
+              transit:
+                description: Transit is the result of the transit probe, when it is
+                  enabled.
+                properties:
+                  healthy:
+                    description: |-
+                      Healthy is the verdict BIRD gets (transit_ok in
+                      dn42_import_transit, with --bird-transit-arg). It changes only after
+                      two probes in a row agree; unset until then.
+                    type: boolean
+                  lastResult:
+                    description: |-
+                      LastResult of the most recent probe: Healthy, Broken or Inconclusive
+                      (no target could be compared).
+                    enum:
+                    - Healthy
+                    - Broken
+                    - Inconclusive
+                    type: string
+                  message:
+                    description: Message describes the most recent probe per target.
+                    type: string
+                  probedAt:
+                    description: ProbedAt is when the most recent probe ran.
+                    format: date-time
+                    type: string
+                type: object
             type: object
         required:
         - spec

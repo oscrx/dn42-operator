@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"os"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	ourctrl "github.com/oscrx/dn42-operator/internal/controller"
 	"github.com/oscrx/dn42-operator/internal/latency"
 	"github.com/oscrx/dn42-operator/internal/netdev"
+	"github.com/oscrx/dn42-operator/internal/transit"
 )
 
 func main() {
@@ -60,6 +62,12 @@ func main() {
 		podName         = flag.String("pod-name", os.Getenv("POD_NAME"), "own pod name, for the leader label (empty: no label)")
 		leaderLabel     = flag.String("leader-label", ourctrl.DefaultLeaderLabel, "pod label the endpoint Service selects the leader by")
 		statusInterval  = flag.Duration("status-interval", 30*time.Second, "status and metrics interval")
+		transitSource   = flag.String("transit-probe-source", "", "our address in the VRF the transit probe connects from (e.g. the router's address on dn42-lo); empty: no transit probe")
+		transitTargets  = flag.String("transit-targets", transit.DefaultTargets, "TCP services the transit probe connects to through each peer, kind:[addr]:port (kind dns or http)")
+		transitTable    = flag.Int("transit-table", 4243, "routing table the transit probe steers its connections with")
+		transitMark     = flag.Uint("transit-mark", 0x420000, "fwmark of the transit probe's connections (nothing else may use it)")
+		transitPref     = flag.Int("transit-rule-priority", 80, "priority of the transit probe's ip rule (ahead of the l3mdev rule at 1000)")
+		birdTransitArg  = flag.Bool("bird-transit-arg", false, "import with dn42_import_transit(latency, bandwidth, crypto, transit_ok) instead of dn42_import(...); bird.conf must define it first")
 	)
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -75,6 +83,8 @@ func main() {
 		metricsAddr: *metricsAddr, probeAddr: *probeAddr,
 		cleanupShutdown: *cleanupShutdown, teardownOnLoss: *teardownOnLoss, statusInterval: *statusInterval,
 		podName: *podName, leaderLabel: *leaderLabel,
+		transitSource: *transitSource, transitTargets: *transitTargets, transitTable: *transitTable,
+		transitMark: *transitMark, transitPref: *transitPref, birdTransitArg: *birdTransitArg,
 	}); err != nil {
 		log.Error(err, "exiting")
 		os.Exit(1)
@@ -90,6 +100,10 @@ type runConfig struct {
 	cleanupShutdown, teardownOnLoss                           bool
 	statusInterval                                            time.Duration
 	podName, leaderLabel                                      string
+	transitSource, transitTargets                             string
+	transitTable, transitPref                                 int
+	transitMark                                               uint
+	birdTransitArg                                            bool
 }
 
 func run(c *runConfig) error {
@@ -98,6 +112,22 @@ func run(c *runConfig) error {
 	}
 	if !bird.ValidIdentifier(c.birdTemplate) {
 		return fmt.Errorf("--bird-template %q is not a plain identifier", c.birdTemplate)
+	}
+	var transitProber *ourctrl.TransitProber
+	if c.transitSource != "" {
+		src, err := netip.ParseAddr(c.transitSource)
+		if err != nil || !src.Is6() || src.Zone() != "" || src.IsLinkLocalUnicast() {
+			return fmt.Errorf("--transit-probe-source %q: want a global or ULA IPv6 address", c.transitSource)
+		}
+		targets, err := transit.ParseTargets(c.transitTargets)
+		if err != nil {
+			return err
+		}
+		if c.transitMark == 0 || c.transitMark > 0xffffffff {
+			return fmt.Errorf("--transit-mark must be a non-zero 32-bit value")
+		}
+		transitProber = &ourctrl.TransitProber{Targets: targets,
+			Net: &transit.Linux{VRF: c.vrf, Source: src, Table: c.transitTable, Mark: uint32(c.transitMark), Pref: c.transitPref}}
 	}
 	if fi, err := os.Stat(c.peersDir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("--peers-dir %s is not a directory", c.peersDir)
@@ -151,7 +181,7 @@ func run(c *runConfig) error {
 		NetDev:            netdev.NewLinux(),
 		Dir:               &bird.Dir{Path: c.peersDir, Bird: birdClient, ConfigFile: c.birdConfig, ConfigSource: c.birdConfigSrc},
 		Bird:              birdClient,
-		Renderer:          bird.Renderer{Template: c.birdTemplate},
+		Renderer:          bird.Renderer{Template: c.birdTemplate, TransitArg: c.birdTransitArg},
 		Resolve:           ourctrl.DefaultResolver,
 		State:             state,
 		Labeler:           labeler,
@@ -205,6 +235,12 @@ func run(c *runConfig) error {
 	}
 	if err := mgr.Add(&ourctrl.LatencyProber{R: r, Pinger: latency.ICMP{}}); err != nil {
 		return err
+	}
+	if transitProber != nil {
+		transitProber.R, transitProber.Routes = r, birdClient
+		if err := mgr.Add(transitProber); err != nil {
+			return err
+		}
 	}
 	if err := mgr.Add(&ourctrl.StatusLoop{R: r, Interval: c.statusInterval}); err != nil {
 		return err

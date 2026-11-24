@@ -82,6 +82,9 @@ type Peer struct {
 	// defaults and the latency may be replaced by a measurement.
 	LinkSet bool
 	KeyRef  string // "" = the shared autopeer key
+	// NoTransit is true when the transit probe found that TCP through the
+	// peer breaks (status.transit.healthy false); rendered as transit_ok.
+	NoTransit bool
 }
 
 // Interface is the WireGuard link name.
@@ -233,6 +236,10 @@ func FromSpec(name string, s *dn42v1.DN42PeerSpec) (*Peer, *Error) {
 	}
 	return p, nil
 }
+
+// ApplyTransit takes the transit probe's verdict; nil (not probed or not
+// confirmed yet) keeps transit allowed.
+func (p *Peer) ApplyTransit(healthy *bool) { p.NoTransit = healthy != nil && !*healthy }
 
 // ApplyMeasuredLatency uses a measured latency community when the spec has
 // no link values. Out-of-range values are ignored.

@@ -107,6 +107,7 @@ pass every 60s. Status and metrics are written every 30s.
    answer (at least 5 of 10 replies are needed; retried hourly), the
    default 5 is used. `kubectl get dn42peers -o wide` shows the effective
    latency.
+   **Transit** (with `--transit-probe-source`): see [Transit probe](#transit-probe).
 5. **Service**: `spec.ports` of the endpoint Service (one UDP port `wg-<name>`
    per tunnel), via server-side apply with field manager `dn42-operator`.
 
@@ -224,7 +225,62 @@ plus two router agents):
 `--control-configmap`, `--max-delete-fraction`, `--pod-name` (`POD_NAME`),
 `--leader-label`, `--metrics-bind-address`
 (`:9842`), `--health-probe-bind-address` (`:9843`). The pod uses the host
-network, so pick free ports.
+network, so pick free ports. Transit probe: `--transit-probe-source`,
+`--transit-targets`, `--transit-table` (`4243`), `--transit-mark`
+(`0x420000`), `--transit-rule-priority` (`80`), `--bird-transit-arg`.
+
+### Transit probe
+
+Some peers run a stateful firewall that drops our packets of a connection
+whose replies it never sees. When BIRD sends traffic out through such a peer
+and the far end replies via another one, the TCP handshake passes but our
+ACK and data are dropped: connections stall for seconds or hang. Pings, BFD
+and the BGP session over the link all look fine.
+
+With `--transit-probe-source` set to one of our addresses in the VRF (the
+router's address on `dn42-lo`), the leader connects to a few TCP services
+(`--transit-targets`; default the anycast resolver `fd42:d42:d42:53::1:53`
+and wiki `fd42:d42:d42:80::1:80`) through each established peer that has a
+route to them, and compares that with the same targets over our normal
+routes. The connections are forced through the peer with a routing table of
+their own (`--transit-table`, holding /128 routes via the peer's link and an
+unreachable default) and an `ip rule` for their fwmark
+(`--transit-mark`, priority `--transit-rule-priority`, ahead of the VRF's
+l3mdev rule). The mark is set before connect, so the SYN goes through the
+peer too: a firewall that never sees a connection start lets the rest
+through and would hide the problem. Nothing else carries the mark, so real
+traffic is untouched. Replies come back however the far end routes to us.
+
+A target counts as broken when the probe through the peer connects but gets
+no answer within 1.5 s (or doesn't connect), while the control answers; one
+broken target makes the probe `Broken`. The verdict changes only after two
+probes in a row agree: re-probed after 5 minutes when a probe disagrees,
+hourly while broken or inconclusive, daily while healthy. It is kept in
+`status.transit` (`healthy`, `lastResult`, `message`, `probedAt`) and shown
+as the `TransitHealthy` condition (`Unknown` until confirmed; reason
+`Confirming` while a change awaits its second probe) and the
+`dn42_peer_transit_healthy` metric:
+
+    kubectl get dn42peer baragoon -o jsonpath='{.status.transit}'
+
+With `--bird-transit-arg` the import calls
+`dn42_import_transit(latency, bandwidth, crypto, transit_ok)` instead of
+`dn42_import(latency, bandwidth, crypto)`; unknown counts as ok. bird.conf
+decides what to do with it, for example demoting routes that only use the
+peer for transit:
+
+    function dn42_import_transit(int link_latency; int link_bandwidth; int link_crypto; bool transit_ok) -> bool
+    {
+      if !dn42_import(link_latency, link_bandwidth, link_crypto) then return false;
+      if !transit_ok && bgp_path.len > 1 then bgp_local_pref = 10;
+      return true;
+    }
+
+Roll it out in two steps: first add the function to bird.conf, then turn on
+`--bird-transit-arg`. It is a separate function rather than a fourth
+`dn42_import` argument because BIRD checks a new bird.conf against the
+current snippets and new snippets against the current bird.conf; a changed
+signature would fail both checks.
 
 ### Metrics
 
@@ -234,7 +290,8 @@ network, so pick free ports.
 `dn42_operator_bird_up`, and per peer (`peer`, `asn` labels):
 `dn42_peer_valid`, `dn42_peer_tunnel_ready`,
 `dn42_peer_handshake_age_seconds`, `dn42_peer_bgp_established`,
-`dn42_peer_routes_imported`, `dn42_peer_endpoint_rtt_seconds`.
+`dn42_peer_routes_imported`, `dn42_peer_endpoint_rtt_seconds`,
+`dn42_peer_transit_healthy`.
 
 ## Development
 

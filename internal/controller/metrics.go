@@ -30,15 +30,17 @@ var (
 		Name: "dn42_peer_bgp_established", Help: "1 if the BGP session is Established."}, []string{"peer", "asn"})
 	mPeerRoutes = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "dn42_peer_routes_imported", Help: "Routes imported from the peer."}, []string{"peer", "asn"})
+	mPeerTransitHealthy = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "dn42_peer_transit_healthy", Help: "Transit probe verdict: 1 healthy, 0 broken; absent until confirmed."}, []string{"peer", "asn"})
 )
 
 func init() {
 	metrics.Registry.MustRegister(mLeader, mPasses, mPassErrors, mLinkChanges, mDeletionsBlocked, mBirdUp,
-		mPeerValid, mPeerTunnelReady, mPeerHandshakeAge, mPeerEstablished, mPeerRoutes)
+		mPeerValid, mPeerTunnelReady, mPeerHandshakeAge, mPeerEstablished, mPeerRoutes, mPeerTransitHealthy)
 }
 
 func resetPeerMetrics() {
-	for _, g := range []*prometheus.GaugeVec{mPeerValid, mPeerTunnelReady, mPeerHandshakeAge, mPeerEstablished, mPeerRoutes} {
+	for _, g := range []*prometheus.GaugeVec{mPeerValid, mPeerTunnelReady, mPeerHandshakeAge, mPeerEstablished, mPeerRoutes, mPeerTransitHealthy} {
 		g.Reset()
 	}
 }

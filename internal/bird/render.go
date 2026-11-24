@@ -19,6 +19,14 @@ func ValidIdentifier(s string) bool { return identRe.MatchString(s) }
 type Renderer struct {
 	// Template is the "template bgp" every peer protocol uses (dnpeers).
 	Template string
+	// TransitArg makes the import call dn42_import_transit(latency,
+	// bandwidth, crypto, transit_ok) with the transit probe's verdict,
+	// instead of dn42_import(latency, bandwidth, crypto). It is a function of
+	// its own, not a fourth dn42_import argument, so bird.conf can define it
+	// before this is turned on: BIRD checks a new bird.conf against the
+	// current snippets and new snippets against the current bird.conf, so a
+	// changed signature could never pass either check.
+	TransitArg bool
 }
 
 // Render returns the snippet for one peer. Every value comes from a typed
@@ -42,7 +50,11 @@ func (r Renderer) Render(p *peer.Peer) (string, error) {
 	fmt.Fprintf(&b, "  neighbor %s as %d;\n", p.Neighbor, p.ASN)
 	fmt.Fprintf(&b, "  interface \"%s\";\n", p.Interface())
 	fmt.Fprintf(&b, "  ipv6 {\n")
-	fmt.Fprintf(&b, "    import where dn42_import(%d, %d, %d);\n", p.Link.Latency, p.Link.Bandwidth, p.Link.Crypto)
+	if r.TransitArg {
+		fmt.Fprintf(&b, "    import where dn42_import_transit(%d, %d, %d, %t);\n", p.Link.Latency, p.Link.Bandwidth, p.Link.Crypto, !p.NoTransit)
+	} else {
+		fmt.Fprintf(&b, "    import where dn42_import(%d, %d, %d);\n", p.Link.Latency, p.Link.Bandwidth, p.Link.Crypto)
+	}
 	fmt.Fprintf(&b, "    export where dn42_export(%d, %d, %d);\n", p.Link.Latency, p.Link.Bandwidth, p.Link.Crypto)
 	fmt.Fprintf(&b, "  };\n")
 	fmt.Fprintf(&b, "}\n")

@@ -92,6 +92,9 @@ func (r *Reconciler) UpdateStatus(ctx context.Context) error {
 		if status.RoutesImported != nil {
 			mPeerRoutes.WithLabelValues(labels...).Set(float64(*status.RoutesImported))
 		}
+		if h := verdict(status.Transit); h != nil {
+			mPeerTransitHealthy.WithLabelValues(labels...).Set(b2f(*h))
+		}
 
 		if equality.Semantic.DeepEqual(obj.Status, status) {
 			continue
@@ -173,5 +176,32 @@ func buildStatus(obj *dn42v1.DN42Peer, pr *peerResult, st *netdev.State, proto *
 		}
 		set(dn42v1.ConditionSessionEstablished, est, reason, "")
 	}
+	setTransitCondition(&s, gen, now)
 	return s
+}
+
+// setTransitCondition mirrors status.transit (written by the
+// TransitProber) as the TransitHealthy condition. The condition is derived
+// here so the status loop stays the only writer of the conditions.
+func setTransitCondition(s *dn42v1.DN42PeerStatus, gen int64, now time.Time) {
+	t := s.Transit
+	if t == nil {
+		meta.RemoveStatusCondition(&s.Conditions, dn42v1.ConditionTransitHealthy)
+		return
+	}
+	c := metav1.Condition{Type: dn42v1.ConditionTransitHealthy, Status: metav1.ConditionUnknown,
+		Reason: "Probing", Message: t.Message, ObservedGeneration: gen, LastTransitionTime: metav1.NewTime(now)}
+	if t.Healthy != nil {
+		c.Status, c.Reason = metav1.ConditionFalse, dn42v1.TransitBroken
+		if *t.Healthy {
+			c.Status, c.Reason = metav1.ConditionTrue, dn42v1.TransitHealthy
+		}
+		switch {
+		case t.LastResult == dn42v1.TransitInconclusive:
+			c.Reason = dn42v1.TransitInconclusive
+		case pending(t):
+			c.Reason = "Confirming"
+		}
+	}
+	meta.SetStatusCondition(&s.Conditions, c)
 }
