@@ -26,9 +26,11 @@ var mPeerRTT = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 
 func init() { metrics.Registry.MustRegister(mPeerRTT) }
 
-// LatencyProber measures the endpoint RTT of peers without spec.link once
-// per MaxAge (a day) on the leader, writes it to status and triggers a pass
-// so the BIRD snippet uses it.
+// LatencyProber measures the RTT to peers without spec.link once per MaxAge
+// (a day) on the leader, writes it to status and triggers a pass so the BIRD
+// snippet uses it. It pings where WireGuard currently sees the peer (also
+// for peers without spec.endpoint, once they connected), else the
+// configured endpoint.
 type LatencyProber struct {
 	R      *Reconciler
 	Pinger latency.Pinger
@@ -88,7 +90,7 @@ func (p *LatencyProber) Start(ctx context.Context) error {
 // Due reports whether a peer needs a measurement now.
 func (p *LatencyProber) Due(o *dn42v1.DN42Peer, now time.Time) bool {
 	p.defaults()
-	if o.Spec.Link != nil || o.Spec.Endpoint == "" {
+	if o.Spec.Link != nil {
 		return false
 	}
 	p.mu.Lock()
@@ -119,8 +121,12 @@ func (p *LatencyProber) Run(ctx context.Context) (int, error) {
 			continue
 		}
 		pp, verr := peer.FromObject(o)
-		if verr != nil || pp.Endpoint == nil {
+		if verr != nil {
 			continue
+		}
+		ip, ok, err := p.target(ctx, pp)
+		if !ok {
+			continue // no endpoint and never connected: nothing to ping yet
 		}
 		p.mu.Lock()
 		if p.attempts == nil {
@@ -128,14 +134,11 @@ func (p *LatencyProber) Run(ctx context.Context) (int, error) {
 		}
 		p.attempts[o.Name] = now
 		p.mu.Unlock()
-
-		addr, err := p.R.Resolve(ctx, pp.Endpoint)
 		if err != nil {
 			log.Info("cannot resolve endpoint for latency", "peer", o.Name, "error", err.Error())
 			continue
 		}
-		ip, _ := netip.AddrFromSlice(addr.IP)
-		rtt, lat, err := latency.Measure(ctx, p.Pinger, ip.Unmap(), p.Count, p.Interval)
+		rtt, lat, err := latency.Measure(ctx, p.Pinger, ip, p.Count, p.Interval)
 		if err != nil {
 			log.Info("latency measurement failed, keeping the previous value", "peer", o.Name, "endpoint", ip.String(), "error", err.Error())
 			continue
@@ -153,4 +156,29 @@ func (p *LatencyProber) Run(ctx context.Context) (int, error) {
 		written++
 	}
 	return written, nil
+}
+
+// target is the address to ping: where WireGuard currently sees the peer
+// (the source of its last packets), else the configured endpoint. ok is
+// false when there is neither.
+func (p *LatencyProber) target(ctx context.Context, pp *peer.Peer) (ip netip.Addr, ok bool, err error) {
+	if st, _ := p.R.NetDev.Inspect(pp.Interface()); st != nil {
+		for _, wp := range st.Peers {
+			if wp.Endpoint == nil {
+				continue
+			}
+			if a, okIP := netip.AddrFromSlice(wp.Endpoint.IP); okIP {
+				return a.Unmap(), true, nil
+			}
+		}
+	}
+	if pp.Endpoint == nil {
+		return netip.Addr{}, false, nil
+	}
+	addr, err := p.R.Resolve(ctx, pp.Endpoint)
+	if err != nil {
+		return netip.Addr{}, true, err
+	}
+	a, _ := netip.AddrFromSlice(addr.IP)
+	return a.Unmap(), true, nil
 }

@@ -96,12 +96,15 @@ pass every 60s. Status and metrics are written every 30s.
    through. The operator speaks the control socket protocol itself, so no
    `birdc` binary is needed.
 4. **Latency** (only when `spec.link` is unset): once a day the leader sends
-   10 pings to the endpoint over the underlay. It maps the median RTT to the
+   10 pings over the underlay to where WireGuard currently sees the peer
+   (the source of its last packets; for peers without `spec.endpoint` once
+   they have connected), else to the configured endpoint. It maps the median RTT to the
    DN42 latency community: 1 ≤2.7ms, 2 ≤7.3ms, 3 ≤20ms, 4 ≤55ms, 5 ≤148ms,
    6 ≤403ms, 7 ≤1097ms, 8 ≤2981ms, else 9. The result goes to
    `status.measuredLatency`, `measuredRTT` and `latencyMeasuredAt`, and the
-   next pass renders it. Until the first measurement, and when the endpoint
-   doesn't answer (at least 5 of 10 replies are needed; retried hourly), the
+   next pass renders it. Until the first measurement (or the first
+   connection of a peer without endpoint), and when the endpoint doesn't
+   answer (at least 5 of 10 replies are needed; retried hourly), the
    default 5 is used. `kubectl get dn42peers -o wide` shows the effective
    latency.
 5. **Service**: `spec.ports` of the endpoint Service (one UDP port `wg-<name>`

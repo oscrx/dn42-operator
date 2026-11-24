@@ -3,6 +3,7 @@ package fake
 
 import (
 	"fmt"
+	"net"
 	"slices"
 	"sort"
 	"sync"
@@ -98,12 +99,26 @@ func (m *Manager) Ensure(spec *netdev.Spec, now time.Time) (*netdev.Plan, error)
 	s.PrivateKey = spec.PrivateKey
 	s.ListenPort = spec.ListenPort
 	hs := time.Time{}
+	ep := spec.Endpoint
 	if len(s.Peers) == 1 && s.Peers[0].PublicKey == spec.PeerPublicKey {
 		hs = s.Peers[0].LastHandshake
+		if ep == nil {
+			ep = s.Peers[0].Endpoint // like the kernel: a learned endpoint stays
+		}
 	}
-	s.Peers = []netdev.WGPeer{{PublicKey: spec.PeerPublicKey, Endpoint: spec.Endpoint,
+	s.Peers = []netdev.WGPeer{{PublicKey: spec.PeerPublicKey, Endpoint: ep,
 		AllowedIPs: netdev.AllowedIPs, Keepalive: netdev.Keepalive, LastHandshake: hs}}
 	return p, nil
+}
+
+// Roam sets where a link's peer is now seen, as WireGuard does when packets
+// arrive from a new address.
+func (m *Manager) Roam(name string, ep *net.UDPAddr) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.Links[name]; ok && len(s.Peers) == 1 {
+		s.Peers[0].Endpoint = ep
+	}
 }
 
 // Delete removes a managed link; foreign links are refused.

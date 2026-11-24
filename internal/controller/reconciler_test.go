@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -422,10 +423,12 @@ type fixedPinger struct {
 	rtt   time.Duration
 	fail  bool
 	calls int
+	addrs []string // pinged, in order
 }
 
-func (f *fixedPinger) Ping(_ context.Context, _ netip.Addr, count int, _ time.Duration) ([]time.Duration, error) {
+func (f *fixedPinger) Ping(_ context.Context, addr netip.Addr, count int, _ time.Duration) ([]time.Duration, error) {
 	f.calls++
+	f.addrs = append(f.addrs, addr.String())
 	if f.fail {
 		return nil, errors.New("no replies")
 	}
@@ -509,6 +512,25 @@ func TestLatencyProber(t *testing.T) {
 	pinger.fail = false
 	if n, _ := lp.Run(context.Background()); n != 1 {
 		t.Error("no retry after an hour")
+	}
+	if u.peer("noep").Status.MeasuredLatency != nil {
+		t.Error("peer without endpoint measured before it connected")
+	}
+
+	// Where WireGuard sees the peer is what gets pinged: a peer without
+	// spec.endpoint once it connected, and a peer that moved.
+	u.nd.Roam("wg-noep", &net.UDPAddr{IP: net.ParseIP("2001:db8::33"), Port: 51820})
+	u.mustPass() // a pass keeps the learned endpoint of a peer without spec.endpoint
+	// (A configured endpoint is only restored when the handshake is stale;
+	// the fake has none, so roam after the pass, as with a live tunnel.)
+	u.nd.Roam("wg-measured", &net.UDPAddr{IP: net.ParseIP("2001:db8::44"), Port: 51820})
+	now = now.Add(25 * time.Hour)
+	pinger.addrs = nil
+	if n, _ := lp.Run(context.Background()); n != 2 || u.peer("noep").Status.MeasuredLatency == nil {
+		t.Fatalf("after connecting: n=%d status %+v", n, u.peer("noep").Status)
+	}
+	if got := strings.Join(pinger.addrs, ","); got != "2001:db8::44,2001:db8::33" {
+		t.Errorf("pinged %s, want the live endpoints 2001:db8::44,2001:db8::33", got)
 	}
 }
 
