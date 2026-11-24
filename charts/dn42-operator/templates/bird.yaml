@@ -79,7 +79,12 @@ spec:
           image: {{ include "dn42-operator.birdImage" . | quote }}
           imagePullPolicy: {{ .Values.bird.image.pullPolicy }}
           command: [bird, -f, -c, /etc/bird/live/bird.conf, -s, /var/run/dn42-bird/bird.ctl]
-          securityContext: {privileged: true}
+          # Not privileged: routes and the VRF (NET_ADMIN), sessions bound to
+          # their wg- interface (NET_RAW for SO_BINDTODEVICE) and port 179.
+          securityContext:
+            capabilities:
+              drop: [ALL]
+              add: [NET_ADMIN, NET_RAW, NET_BIND_SERVICE]
           # Signal only (nothing routes to this pod): BIRD answers its socket.
           readinessProbe:
             exec: {command: [birdc, -s, /var/run/dn42-bird/bird.ctl, show, status]}

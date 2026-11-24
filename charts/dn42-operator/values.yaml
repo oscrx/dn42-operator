@@ -35,14 +35,15 @@ operator:
   controlConfigMap: dn42-operator-control
 
   # Remove managed links before releasing the lease on shutdown, and as soon
-  # as the lease can't be renewed. Both are needed with a standby node (a
-  # tunnel key must never be live on two nodes). On a single router set both
-  # false, so operator restarts and API outages keep the tunnels up.
-  cleanupOnShutdown: true
-  teardownOnLeaseLoss: true
+  # as the lease can't be renewed. Off by default, so operator restarts and
+  # short API outages keep the tunnels up on a single router. Turn both on
+  # with a standby node: a tunnel key must never be live on two nodes.
+  cleanupOnShutdown: false
+  teardownOnLeaseLoss: false
 
   # Host network: the ports are opened on the node, bound to the node's
-  # address only.
+  # address only. Metrics name the peers and their state, so keep them
+  # behind a firewall that blocks inbound traffic to the node.
   metricsPort: 9842
   healthProbePort: 9843
 

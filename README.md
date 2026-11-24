@@ -152,8 +152,9 @@ You provide the namespace (PodSecurity `privileged`), the key Secret
 (`bird.config.configMapName`, or `bird.config.create` with `content`).
 bird.conf must define the `dnpeers` template and include
 `/etc/bird/peers/*.conf`; the operator `configure`s BIRD when it changes,
-after `configure check`. On a single router set
-`operator.cleanupOnShutdown` and `operator.teardownOnLeaseLoss` to false.
+after `configure check`. With a standby node, set
+`operator.cleanupOnShutdown` and `operator.teardownOnLeaseLoss` to true (off
+by default, which suits a single router).
 See `values.yaml` for the rest.
 
 `images/bird/Dockerfile` is the BIRD image (`make bird-image`), built from

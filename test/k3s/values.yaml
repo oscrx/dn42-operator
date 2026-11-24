@@ -2,10 +2,12 @@
 # repositories and tags), a test bird.conf, an init container that creates
 # vrf-dn42 (Talos does that on real nodes), the endpoint Service, and a short
 # status interval. The standby node is real here, so both teardown flags
-# keep their chart defaults (true).
+# are on, as with any standby setup (the chart defaults them off).
 operator:
   image:
     pullPolicy: Never
+  cleanupOnShutdown: true
+  teardownOnLeaseLoss: true
   endpointService: dn42-endpoint
   extraArgs: [--status-interval=5s]
 

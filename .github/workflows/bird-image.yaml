@@ -32,6 +32,8 @@ jobs:
   test:
     name: Integration (VRF, WireGuard, BIRD)
     runs-on: ubuntu-latest
+    # A manual run publishes too: only from main, never a feature branch.
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
