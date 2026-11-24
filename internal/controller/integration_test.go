@@ -5,14 +5,19 @@ package controller
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/vishvananda/netns"
+	"golang.zx2c4.com/wireguard/wgctrl"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
@@ -143,13 +148,8 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "-n", "remote", "addr", "add", "2001:db8:42::2/64", "dev", "veth-remote", "nodad")
 
 	ourKey, remoteKey := genKey(t), genKey(t)
-	if err := os.WriteFile(filepath.Join(work, "remote.key"), []byte(remoteKey.String()), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	sh(t, "ip", "-n", "remote", "link", "add", "wg-remote", "type", "wireguard")
-	sh(t, "ip", "netns", "exec", "remote", "wg", "set", "wg-remote",
-		"private-key", filepath.Join(work, "remote.key"), "listen-port", "51820",
-		"peer", ourKey.PublicKey().String(), "allowed-ips", "fe80::/10,fd00::/8")
+	configureRemoteWG(t, remoteKey, ourKey.PublicKey())
 	sh(t, "ip", "-n", "remote", "addr", "add", "fe80::1/64", "dev", "wg-remote")
 	sh(t, "ip", "-n", "remote", "link", "set", "wg-remote", "up")
 
@@ -318,5 +318,55 @@ func TestIntegrationEndToEnd(t *testing.T) {
 		if err != nil || st == nil || st.Managed() || st.Master != "vrf-dn42" {
 			t.Errorf("%s changed: %+v %v", l, st, err)
 		}
+	}
+}
+
+// configureRemoteWG sets up wg-remote in the "remote" namespace through
+// wgctrl. Not with wg(8): hosts with an AppArmor profile for wg (Ubuntu
+// 26.04 runners) confine it in the container too, so it can't read a key
+// file outside /etc/wireguard.
+func configureRemoteWG(t *testing.T, key wgtypes.Key, peerKey wgtypes.Key) {
+	t.Helper()
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	orig, err := netns.Get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = orig.Close() }()
+	remote, err := netns.GetFromName("remote")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = remote.Close() }()
+	if err := netns.Set(remote); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := netns.Set(orig); err != nil {
+			panic(err) // the thread is unusable in the wrong namespace
+		}
+	}()
+	c, err := wgctrl.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	port := 51820
+	allowed := []string{"fe80::/10", "fd00::/8"}
+	var ips []net.IPNet
+	for _, a := range allowed {
+		_, n, err := net.ParseCIDR(a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ips = append(ips, *n)
+	}
+	if err := c.ConfigureDevice("wg-remote", wgtypes.Config{
+		PrivateKey: &key,
+		ListenPort: &port,
+		Peers:      []wgtypes.PeerConfig{{PublicKey: peerKey, AllowedIPs: ips}},
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
