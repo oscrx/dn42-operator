@@ -408,7 +408,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	req := Request{ASN: asn, Name: form["name"], PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"], MTU: mtu}
-	obj, p, err := BuildPeer(s.Cfg, &sess.Identity, req, existing)
+	obj, p, err := BuildPeer(s.Cfg, &sess.Identity, &req, existing)
 	var fe *FieldError
 	if errors.As(err, &fe) {
 		again(fe.Message, fe.Field)
@@ -593,7 +593,7 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 			others = append(others, *pd.Peer)
 		}
 	}
-	obj, p, err := UpdatePeer(s.Cfg, &sess.Identity, target, Request{PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"], MTU: mtu}, others)
+	obj, p, err := UpdatePeer(s.Cfg, &sess.Identity, target, &Request{PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"], MTU: mtu}, others)
 	var fe *FieldError
 	if errors.As(err, &fe) {
 		s.renderEdit(w, r, http.StatusUnprocessableEntity, sess, target, form, fe.Message)

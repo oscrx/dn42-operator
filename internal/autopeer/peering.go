@@ -70,7 +70,7 @@ func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
 // explicit listenPort: the 2+last-4-digits default when that is free,
 // otherwise the highest free port, so the CI gate and the operator never
 // have to guess.
-func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
+func BuildPeer(cfg *Config, id *Identity, req *Request, existing []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
 	if !id.May(req.ASN) {
 		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", req.ASN)}
 	}
@@ -79,15 +79,15 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 	if req.ASN == cfg.Router.ASN {
 		return nil, nil, &FieldError{"asn", fmt.Sprintf("AS%d is this router's own ASN", req.ASN)}
 	}
-	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
-	if err := peer.ValidateName(req.Name); err != nil {
+	name := strings.ToLower(strings.TrimSpace(req.Name))
+	if err := peer.ValidateName(name); err != nil {
 		return nil, nil, &FieldError{"name", "use 1-12 lowercase letters and digits, starting with a letter"}
 	}
 	used := map[int]bool{}
 	for i := range existing {
 		e := &existing[i]
-		if e.Name == req.Name {
-			return nil, nil, &FieldError{"name", fmt.Sprintf("%q is already taken", req.Name)}
+		if e.Name == name {
+			return nil, nil, &FieldError{"name", fmt.Sprintf("%q is already taken", name)}
 		}
 		if p, err := peer.FromObject(e); err == nil {
 			used[p.ListenPort] = true
@@ -112,7 +112,7 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 	p32 := int32(port)
 	obj := &dn42v1.DN42Peer{
 		TypeMeta:   metav1.TypeMeta{APIVersion: dn42v1.GroupVersion.String(), Kind: "DN42Peer"},
-		ObjectMeta: metav1.ObjectMeta{Name: req.Name, Namespace: cfg.Kubernetes.Namespace},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: cfg.Kubernetes.Namespace},
 		Spec: dn42v1.DN42PeerSpec{
 			ASN:        req.ASN,
 			ListenPort: &p32,
@@ -134,7 +134,7 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 	all := append(append([]dn42v1.DN42Peer(nil), existing...), *obj)
 	all[len(all)-1].CreationTimestamp = metav1.NewTime(time.Now().Add(100 * 365 * 24 * time.Hour))
 	for _, r := range peer.ValidateSet(all) {
-		if r.Object.Name == req.Name && r.Err != nil {
+		if r.Object.Name == name && r.Err != nil {
 			return nil, nil, &FieldError{fieldFor(r.Err.Message), r.Err.Message}
 		}
 	}
@@ -249,7 +249,7 @@ func joinHostPort(host string, port int) string {
 // UpdatePeer changes the peer-controlled fields of an existing autopeer
 // (public key, endpoint, link-local). Name, ASN, listen port and link
 // values stay. others are all other known peers (repo and pending).
-func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, others []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
+func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req *Request, others []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
 	if !id.May(cur.Spec.ASN) {
 		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", cur.Spec.ASN)}
 	}

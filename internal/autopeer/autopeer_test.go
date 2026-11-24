@@ -203,7 +203,7 @@ func TestBuildPeer(t *testing.T) {
 	id := &Identity{Subject: "u", ASNs: []int64{4242420001, 4242420002, 4201270001, 4242423818}}
 	req := Request{ASN: 4242420001, Name: "Alpha", PublicKey: theirPub, Endpoint: "[2001:db8::1]:23818", Neighbor: "fe80::1"}
 
-	obj, p, err := BuildPeer(cfg, id, req, nil)
+	obj, p, err := BuildPeer(cfg, id, &req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,14 +213,14 @@ func TestBuildPeer(t *testing.T) {
 
 	// Default port taken: highest free port, written explicitly.
 	existing := []dn42v1.DN42Peer{existingPeer("other", 4242420009, 20001, "fe80::9"), existingPeer("top", 4242420008, 29999, "fe80::8")}
-	obj, _, err = BuildPeer(cfg, id, req, existing)
+	obj, _, err = BuildPeer(cfg, id, &req, existing)
 	if err != nil || *obj.Spec.ListenPort != 29998 {
 		t.Fatalf("port %v err %v", obj, err)
 	}
 	// Non-4242 ASN gets an explicit port too.
 	r2 := req
 	r2.ASN = 4201270001
-	if obj, _, err := BuildPeer(cfg, id, r2, nil); err != nil || *obj.Spec.ListenPort != 29999 {
+	if obj, _, err := BuildPeer(cfg, id, &r2, nil); err != nil || *obj.Spec.ListenPort != 29999 {
 		t.Fatalf("non-4242: %v %v", obj, err)
 	}
 
@@ -243,7 +243,7 @@ func TestBuildPeer(t *testing.T) {
 	for i, b := range bad {
 		r := req
 		b.mod(&r)
-		_, _, err := BuildPeer(cfg, id, r, b.ex)
+		_, _, err := BuildPeer(cfg, id, &r, b.ex)
 		var fe *FieldError
 		if !errors.As(err, &fe) || fe.Field != b.field {
 			t.Errorf("%d: want field %s, got %v", i, b.field, err)
@@ -254,7 +254,7 @@ func TestBuildPeer(t *testing.T) {
 func TestRenderPeerSide(t *testing.T) {
 	cfg := testConfig(t)
 	id := &Identity{ASNs: []int64{4242420001}}
-	_, p, err := BuildPeer(cfg, id, Request{ASN: 4242420001, Name: "alpha", PublicKey: theirPub,
+	_, p, err := BuildPeer(cfg, id, &Request{ASN: 4242420001, Name: "alpha", PublicKey: theirPub,
 		Endpoint: "[2001:db8::1]:51820", Neighbor: "fe80::1"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestRenderPeerSide(t *testing.T) {
 func TestPeerYAMLRoundTrip(t *testing.T) {
 	cfg := testConfig(t)
 	obj, _, err := BuildPeer(cfg, &Identity{ASNs: []int64{4242420001}},
-		Request{ASN: 4242420001, Name: "alpha", PublicKey: theirPub, Neighbor: "fe80::1"}, nil)
+		&Request{ASN: 4242420001, Name: "alpha", PublicKey: theirPub, Neighbor: "fe80::1"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

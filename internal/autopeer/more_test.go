@@ -1,12 +1,14 @@
 package autopeer
 
 import (
-	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	"html"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 )
@@ -343,6 +345,7 @@ func TestPeerDetailsAndMTU(t *testing.T) {
 	live.Status.BGPState = "Established"
 	a.live = []dn42v1.DN42Peer{live}
 	_, body := a.get("/peer/edit?name=hand")
+	body = html.UnescapeString(body) // keys may contain '+' (&#43;)
 	for _, want := range []string{"PublicKey = " + own.PublicKey().String(), "Established", "fe80::11", "MTU = 1420"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("details page has no %q:\n%s", want, body)
