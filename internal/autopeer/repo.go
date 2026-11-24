@@ -448,7 +448,7 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 	// From here on a failure leaves the branch behind: remove it again.
 	cleanup := func(err error) (string, error) {
 		if derr := g.api(ctx, http.MethodDelete, g.repoPath("/git/refs/heads/%s", escapePath(pr.Branch)), nil, nil); derr != nil {
-			err = fmt.Errorf("%w (and removing branch %s: %v)", err, pr.Branch, derr)
+			err = errors.Join(err, fmt.Errorf("removing branch %s: %w", pr.Branch, derr))
 		}
 		return "", err
 	}
