@@ -62,6 +62,8 @@ type Options struct {
 	// SkipRegistry is set.
 	Registry     registry.ASNSource
 	SkipRegistry bool
+	// LocalASN is the router's own ASN, never a valid peer (0: unchecked).
+	LocalASN int64
 }
 
 // Finding is one problem in one file ("" for the PR as a whole).
@@ -203,6 +205,9 @@ func ParseFile(p string, f File, o *Options) (result *Parsed, problems []string)
 	pp, verr := peer.FromSpec(pf.Metadata.Name, &pf.Spec)
 	if verr != nil {
 		add("%s", verr.Message)
+	}
+	if opt.LocalASN != 0 && pf.Spec.ASN == opt.LocalASN {
+		add("AS%d is this router's own ASN: that session would be iBGP, not a peering", pf.Spec.ASN)
 	}
 	if !opt.SkipRegistry {
 		switch {

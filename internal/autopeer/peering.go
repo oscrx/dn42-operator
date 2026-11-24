@@ -40,6 +40,11 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 	if !id.May(req.ASN) {
 		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", req.ASN)}
 	}
+	// Same ASN on both ends is iBGP: BIRD makes it multihop, which can't
+	// use a link-local neighbor, and it's no DN42 peering anyway.
+	if req.ASN == cfg.Router.ASN {
+		return nil, nil, &FieldError{"asn", fmt.Sprintf("AS%d is this router's own ASN", req.ASN)}
+	}
 	req.Name = strings.ToLower(strings.TrimSpace(req.Name))
 	if err := peer.ValidateName(req.Name); err != nil {
 		return nil, nil, &FieldError{"name", "use 1-12 lowercase letters and digits, starting with a letter"}

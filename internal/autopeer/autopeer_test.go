@@ -200,7 +200,7 @@ func existingPeer(name string, asn int64, port int32, neighbor string) dn42v1.DN
 
 func TestBuildPeer(t *testing.T) {
 	cfg := testConfig(t)
-	id := &Identity{Subject: "u", ASNs: []int64{4242420001, 4242420002, 4201270001}}
+	id := &Identity{Subject: "u", ASNs: []int64{4242420001, 4242420002, 4201270001, 4242423818}}
 	req := Request{ASN: 4242420001, Name: "Alpha", PublicKey: theirPub, Endpoint: "[2001:db8::1]:23818", Neighbor: "fe80::1"}
 
 	obj, p, err := BuildPeer(cfg, id, req, nil)
@@ -230,6 +230,7 @@ func TestBuildPeer(t *testing.T) {
 		ex    []dn42v1.DN42Peer
 	}{
 		{"asn", func(r *Request) { r.ASN = 4242420099 }, nil},
+		{"asn", func(r *Request) { r.ASN = cfg.Router.ASN }, nil},
 		{"name", func(r *Request) { r.Name = "1bad" }, nil},
 		{"name", func(r *Request) { r.Name = "x\"; }" }, nil},
 		{"name", func(r *Request) {}, []dn42v1.DN42Peer{existingPeer("alpha", 4242420005, 0, "fe80::5")}},

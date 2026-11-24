@@ -1,0 +1,10 @@
+apiVersion: dn42.oscarr.nl/v1alpha1
+kind: DN42Peer
+metadata:
+  name: self
+spec:
+  asn: 4242423818
+  listenPort: 23818
+  endpoint: "[2001:db8::10]:23818"
+  publicKey: FOUmTA011X0niEP9LOkspmpV8heA+M+E3qZBW64C7Qw=
+  neighbor: fe80::10

@@ -41,10 +41,11 @@ func run() int {
 		skipRegistry = flag.Bool("skip-registry", false, "don't check ASNs against the registry (local runs only)")
 		peersDir     = flag.String("peers-dir", "peers", "directory with the peer files")
 		namespace    = flag.String("namespace", "dn42", "namespace the peers are synced to")
+		localASN     = flag.Int64("local-asn", 0, "the router's own ASN, rejected as a peer")
 	)
 	flag.Parse()
 
-	opt := peercheck.Options{PeersDir: *peersDir, Namespace: *namespace, SkipRegistry: *skipRegistry}
+	opt := peercheck.Options{PeersDir: *peersDir, Namespace: *namespace, SkipRegistry: *skipRegistry, LocalASN: *localASN}
 	for _, l := range strings.Split(*appLogins, ",") {
 		if l = strings.TrimSpace(l); l != "" {
 			opt.AppLogins = append(opt.AppLogins, l)

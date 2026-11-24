@@ -80,7 +80,7 @@ func TestCases(t *testing.T) {
 				}
 				in.PR = pr
 			}
-			res := Check(in, &Options{AppLogins: []string{app}, Registry: fakeRegistry(t)})
+			res := Check(in, &Options{AppLogins: []string{app}, Registry: fakeRegistry(t), LocalASN: 4242423818})
 			if res.OK() != c.OK {
 				t.Errorf("ok = %v, want %v; errors: %v", res.OK(), c.OK, res.Errors)
 			}
