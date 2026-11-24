@@ -1,0 +1,31 @@
+# autopeer config for make run-local: the fake login provider (hack/fakeidp)
+# and an in-memory peers repo (--fake-repo), so nothing reaches GitHub or a
+# cluster. @WORK@ is the run's temporary directory.
+listen: "127.0.0.1:8099"
+publicURL: http://localhost:8099
+cookieKeyFile: "@WORK@/cookie-key"
+sessionTTL: 1h
+router:
+  asn: 4242423818
+  name: oscrx
+  endpointHost: nl-hou01.dn42.oscarr.nl
+  publicKey: oscrxfobHgtewi+xMJQPNNSEpbBi4XilU7upqJ6Xi2w=
+  linkLocal: fe80::3818
+# Log in with 4242423818 among your ASNs to be admin.
+admin:
+  enabled: true
+lookingGlass:
+  url: https://lg.dn42.oscarr.nl
+  server: nl-hou01
+kubernetes:
+  enabled: false
+providers:
+  - name: fake
+    displayName: Fake DN42 login
+    issuer: http://localhost:8098
+    clientID: run-local
+    scopes: [openid, dn42]
+    claims:
+      subject: sub
+      name: dn42.active_mnt
+      asn: dn42.asn

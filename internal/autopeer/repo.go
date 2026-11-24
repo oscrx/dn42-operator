@@ -75,6 +75,9 @@ type FakeRepo struct {
 	mu    sync.Mutex
 	Files map[string][]byte // path -> content on the base branch
 	PRs   []PullRequest
+	// Merge applies each PR to Files right away instead of keeping it open,
+	// as the peers repo's check and auto-merge do (for trying it locally).
+	Merge bool
 }
 
 // ListPeers parses every *.yaml file.
@@ -109,8 +112,17 @@ func (f *FakeRepo) OpenPR(_ context.Context, pr *PullRequest) (string, error) {
 			return "", fmt.Errorf("branch %s exists", pr.Branch)
 		}
 	}
+	url := fmt.Sprintf("https://github.com/example/peers/pull/%d", len(f.PRs)+1)
+	if f.Merge {
+		if pr.Delete {
+			delete(f.Files, pr.Path)
+		} else {
+			f.Files[pr.Path] = pr.Content
+		}
+		return url, nil
+	}
 	f.PRs = append(f.PRs, *pr)
-	return fmt.Sprintf("https://github.com/example/peers/pull/%d", len(f.PRs)), nil
+	return url, nil
 }
 
 // PendingPeers treats every recorded PR as open.

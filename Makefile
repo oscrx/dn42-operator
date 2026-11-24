@@ -25,6 +25,10 @@ generate.verify: generate ## Fail if generated code is out of date
 build: ## Build all binaries for the host
 	go build ./...
 
+.PHONY: run-local
+run-local: ## Try autopeer locally as any ASN: fake login provider + in-memory repo (http://localhost:8099)
+	./hack/run-local.sh
+
 .PHONY: test
 test: ## Unit tests with race detection
 	go test -race -count=1 ./...

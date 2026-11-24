@@ -26,7 +26,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "/etc/autopeer/config.yaml", "config file")
-	fakeRepo := flag.Bool("fake-repo", false, "keep PRs in memory instead of calling GitHub (local testing)")
+	fakeRepo := flag.Bool("fake-repo", false, "keep the peers repo in memory instead of calling GitHub; PRs merge at once (local testing)")
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -60,7 +60,7 @@ func run(configPath string, fakeRepo bool) error {
 
 	var repo autopeer.PeerRepo
 	if fakeRepo {
-		repo = &autopeer.FakeRepo{Files: map[string][]byte{}}
+		repo = &autopeer.FakeRepo{Files: map[string][]byte{}, Merge: true}
 	} else {
 		gh, err := autopeer.NewGitHubApp(&cfg.GitHub)
 		if err != nil {

@@ -323,7 +323,11 @@ the request's host, so a forged `Host` header can't send it elsewhere.
 Submissions and removals are rate limited per login and in total
 (`limits`, in memory).
 
-`--fake-repo` keeps PRs in memory for local runs. The tests run the full
+To try it as a peer would, `make run-local` starts autopeer on
+http://localhost:8099 with a fake login provider (`hack/fakeidp`: log in as
+any ASNs and mntner; add the router's ASN to be admin) and `--fake-repo`, an
+in-memory peers repo where PRs merge at once. Nothing reaches GitHub or a
+cluster, so there is no live BGP state. The tests run the full
 flow against a fake OIDC/OAuth provider that enforces PKCE and nonce, and the
 GitHub App client against a fake GitHub API.
 
