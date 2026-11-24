@@ -58,13 +58,6 @@
       "datasourceTemplate": "docker"
     },
     {
-      "description": "The git-sync image the autopeer chart runs (helm-values is off for charts/).",
-      "customType": "regex",
-      "managerFilePatterns": ["/^charts/dn42-autopeer/values\\.yaml$/"],
-      "matchStrings": ["repository: (?<depName>registry\\.k8s\\.io/git-sync/git-sync)\\s+tag: (?<currentValue>v[0-9.]+)"],
-      "datasourceTemplate": "docker"
-    },
-    {
       "description": "make lint pins the same golangci-lint as ci.yaml.",
       "customType": "regex",
       "managerFilePatterns": ["/^Makefile$/"],

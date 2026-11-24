@@ -18,7 +18,6 @@ import (
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/peer"
-	"github.com/oscrx/dn42-operator/internal/registry"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
@@ -48,7 +47,6 @@ type Session struct {
 type Server struct {
 	Cfg       *Config
 	Providers map[string]*Provider
-	Registry  *registry.Registry
 	Repo      PeerRepo
 	Status    StatusSource // optional
 	Cookies   *Cookies
@@ -56,8 +54,8 @@ type Server struct {
 }
 
 // NewServer wires providers from the config.
-func NewServer(cfg *Config, reg *registry.Registry, repo PeerRepo, status StatusSource, cookies *Cookies) *Server {
-	s := &Server{Cfg: cfg, Providers: map[string]*Provider{}, Registry: reg, Repo: repo, Status: status, Cookies: cookies,
+func NewServer(cfg *Config, repo PeerRepo, status StatusSource, cookies *Cookies) *Server {
+	s := &Server{Cfg: cfg, Providers: map[string]*Provider{}, Repo: repo, Status: status, Cookies: cookies,
 		Limiter: &Limiter{PerKey: cfg.Limits.PerLoginPerHour, Total: cfg.Limits.TotalPerHour}}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
@@ -277,7 +275,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	// Which claims the provider sent (names only, never values): enough to
 	// map claims.* for a new provider without logging personal data.
 	log.Info("claims", "provider", name, "names", claimNames(claims, ""))
-	id, err := IdentityFromClaims(p.Config, claims, s.Registry)
+	id, err := IdentityFromClaims(p.Config, claims)
 	if err != nil {
 		log.Info("login without ASN", "provider", name, "error", err.Error())
 		s.fail(w, http.StatusForbidden, "Your login did not show any DN42 ASN you maintain.")

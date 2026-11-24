@@ -119,7 +119,7 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          securityContext: &locked
+          securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
@@ -129,31 +129,6 @@ spec:
             {{- if .Values.extraCACerts }}
             - {name: ca, mountPath: /etc/autopeer-ca, readOnly: true}
             {{- end }}
-            {{- if .Values.gitSync.enabled }}
-            - {name: registry, mountPath: /registry-root, readOnly: true}
-            {{- end }}
-        {{- if .Values.gitSync.enabled }}
-        - name: git-sync
-          image: "{{ .Values.gitSync.image.repository }}:{{ .Values.gitSync.image.tag }}"
-          imagePullPolicy: {{ .Values.gitSync.image.pullPolicy }}
-          args:
-            - --repo={{ .Values.gitSync.repo }}
-            - --root=/registry-root
-            - --link=registry
-            - --period={{ .Values.gitSync.period }}
-            - --depth=1
-            - --username={{ .Values.gitSync.username }}
-            - --password-file=/secrets/registry-token
-          {{- with .Values.gitSync.resources }}
-          resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-          securityContext: *locked
-          volumeMounts:
-            - {name: registry, mountPath: /registry-root}
-            - {name: tmp, mountPath: /tmp}
-            - {name: secrets, mountPath: /secrets, readOnly: true}
-        {{- end }}
       volumes:
         - name: config
           configMap: {name: dn42-autopeer-config}
@@ -162,10 +137,6 @@ spec:
         {{- if .Values.extraCACerts }}
         - name: ca
           configMap: {name: dn42-autopeer-ca}
-        {{- end }}
-        {{- if .Values.gitSync.enabled }}
-        - {name: registry, emptyDir: {}}
-        - {name: tmp, emptyDir: {}}
         {{- end }}
 {{- with .Values.peersNamespace }}
 ---

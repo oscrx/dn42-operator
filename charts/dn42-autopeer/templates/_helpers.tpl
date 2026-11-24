@@ -30,9 +30,6 @@ app.kubernetes.io/part-of: dn42-router
 {{- if not .Values.existingSecret -}}
 {{- fail "existingSecret is required (cookie key, GitHub App key, client secrets)" -}}
 {{- end -}}
-{{- if and .Values.gitSync.enabled (not .Values.gitSync.username) -}}
-{{- fail "gitSync.username is required: git.dn42.dev has no anonymous clones" -}}
-{{- end -}}
 {{- with .Values.config.kubernetes -}}
 {{- if and .enabled (ne (default "dn42" .namespace) $.Values.peersNamespace) -}}
 {{- fail "config.kubernetes.namespace must equal peersNamespace (the Role is only there)" -}}

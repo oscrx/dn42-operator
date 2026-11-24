@@ -21,7 +21,6 @@ import (
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/autopeer"
-	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 func main() {
@@ -50,14 +49,6 @@ func run(configPath string, fakeRepo bool) error {
 	if err != nil {
 		return err
 	}
-	// Only for mntner claims; without registry.path there is no registry.
-	var reg *registry.Registry
-	var regErr error
-	if cfg.Registry.Path != "" {
-		reg = &registry.Registry{Path: cfg.Registry.Path}
-		regErr = reg.Load() // the git-sync sidecar may not have cloned yet
-	}
-
 	var repo autopeer.PeerRepo
 	if fakeRepo {
 		repo = &autopeer.FakeRepo{Files: map[string][]byte{}, Merge: true}
@@ -84,25 +75,9 @@ func run(configPath string, fakeRepo bool) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go func() {
-		if reg == nil {
-			return
-		}
-		for regErr != nil {
-			ctrl.Log.Info("registry not loaded yet, mntner logins find no ASNs until it is", "error", regErr.Error())
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(10 * time.Second):
-			}
-			regErr = reg.Load()
-		}
-		reg.Run(ctx, cfg.Registry.Refresh.Duration, cfg.Registry.Pull)
-	}()
-
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           autopeer.NewServer(cfg, reg, repo, status, cookies).Handler(),
+		Handler:           autopeer.NewServer(cfg, repo, status, cookies).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

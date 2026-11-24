@@ -270,8 +270,7 @@ access to `dn42peers` in the router's namespace for the status page. It never
 writes to the cluster; changes go out as PRs.
 
 The Helm chart `charts/dn42-autopeer` (`oci://ghcr.io/oscrx/charts/dn42-autopeer`,
-signed) installs the Deployment (with an optional git-sync sidecar for the
-registry), its Service and ConfigMap, and the read-only Role in
+signed) installs the Deployment, its Service and ConfigMap, and the read-only Role in
 `peersNamespace`. The config is `config:` in the values, rendered as-is; see
 `deploy/autopeer-config.example.yaml`. Secrets come from `existingSecret`,
 mounted at `/secrets`. Routing (Gateway/Ingress, certificates) is left to
@@ -285,13 +284,12 @@ The flow:
    discovery). Without `issuer`, it uses `authURL`/`tokenURL`/`userinfoURL`
    (plain OAuth, identity from userinfo).
 2. **Ownership**: `claims.asn` names the claim with the ASNs the login may
-   manage. Dotted paths, numbers, `AS…` strings and lists all work.
-   `claims.mntner` names a claim with mntners; their ASNs come from
-   `mnt-by:` in a DN42 registry clone (`data/aut-num`), reloaded on an
-   interval. No accounts: the login lives in an AES-GCM encrypted cookie for
+   manage. Dotted paths, numbers, `AS…` strings and lists all work. The
+   provider vouches for them: autopeer keeps no registry of its own (the
+   peers repo's gate checks each ASN has an aut-num object). No accounts: the login lives in an AES-GCM encrypted cookie for
    `sessionTTL`.
-3. **Form**: ASN (from the login), name (suggested from the login's mntner),
-   WireGuard public key, optional IPv6 endpoint, link-local address
+3. **Form**: ASN (from the login), name (suggested from the login's name
+   claim, e.g. its mntner), WireGuard public key, optional IPv6 endpoint, link-local address
    (suggested as `fe80::<last 4 digits of the ASN>`), optional MTU. These
    are checked with the same code as the
    operator, against the peers already in the repo: name, port, ASN +
@@ -341,14 +339,14 @@ example config:
 
 - **Kioubit** (AS4242423914): the OIDC issuer URL and its client
   registration (message Kioubit on IRC to activate the domain). Which scope
-  releases the ASN, and the claim name and format for ASN and/or mntner.
+  releases the ASN, and the claim name and format for the ASNs.
 - **OAuth.dn42 / iedon** (auth.iedon.net): the exact issuer (discovery
-  path), self-service registration, and whether the ASN or mntner is in the
+  path), self-service registration, and whether the ASN is in the
   ID token or only in userinfo (`useUserinfo`). Also the claim names.
 - **HExpNetwork WebAuth** (AS4242420298): everything (OIDC or not,
   endpoints, claims, registration).
 - **Auth42 / burble**: OIDC or plain OAuth, endpoints, claim names (subject,
-  mntner/ASN), and registration.
+  ASN), and registration.
 - For all four: does the claim mean "may manage" (`mnt-by`) or only
   "authenticated as"? Do they support PKCE for confidential clients? Which
   redirect URIs are allowed (`dn42.oscarr.nl` and `autopeer.oscrx.dn42`)?

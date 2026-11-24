@@ -15,7 +15,6 @@ imagePullSecrets: []
 #   cookieKeyFile: /secrets/cookie-key
 #   github.privateKeyFile: /secrets/github-app.pem
 #   providers[].clientSecretFile: /secrets/<name>-client-secret
-# With gitSync enabled, set registry.path: /registry-root/registry.
 # kubernetes.namespace must be peersNamespace (below).
 config: {}
 
@@ -29,31 +28,13 @@ extraCACerts: ""
 
 # Secret mounted at /secrets. Not created by the chart: keep it in a
 # SealedSecret or similar. Holds the cookie key, the GitHub App private key,
-# client secrets and (for git-sync) the registry token.
+# client secrets.
 existingSecret: dn42-autopeer
 
 # Namespace of the DN42Peer objects (the dn42-operator release). The chart
 # creates a Role there to get/list them for the status page, nothing else.
 # Empty: no Role (and set config.kubernetes.enabled: false).
 peersNamespace: dn42-router
-
-# Keeps a clone of the DN42 registry fresh. Only needed for mntner claims
-# (mntner -> ASNs): providers that return the ASN itself need no registry,
-# so leave this off and config.registry unset. The registry needs an
-# account: the token is the registry-token key of existingSecret.
-gitSync:
-  enabled: false
-  image:
-    repository: registry.k8s.io/git-sync/git-sync
-    tag: v4.8.0
-    pullPolicy: IfNotPresent
-  repo: https://git.dn42.dev/dn42/registry.git
-  # The registry account the token belongs to.
-  username: ""
-  period: 1h
-  resources:
-    requests: {cpu: 10m, memory: 32Mi}
-    limits: {memory: 256Mi}
 
 # Rate limits live in memory, per replica: keep this at 1.
 replicaCount: 1

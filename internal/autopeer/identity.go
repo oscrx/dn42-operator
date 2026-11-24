@@ -9,18 +9,16 @@ import (
 	"strings"
 
 	"github.com/oscrx/dn42-operator/internal/peer"
-	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 var providerNameRe = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
 
 // Identity is a normalised login: who, and which ASNs they may manage.
 type Identity struct {
-	Provider string   `json:"p"`
-	Subject  string   `json:"s"`
-	Name     string   `json:"n,omitempty"`
-	Mntners  []string `json:"m,omitempty"`
-	ASNs     []int64  `json:"a"`
+	Provider string  `json:"p"`
+	Subject  string  `json:"s"`
+	Name     string  `json:"n,omitempty"`
+	ASNs     []int64 `json:"a"`
 	// Admin may manage peerings of any DN42 ASN (set at login, see
 	// Config.IsAdmin; the session cookie is encrypted, so it can't be forged).
 	Admin bool `json:"ad,omitempty"`
@@ -121,10 +119,10 @@ func parseASN(s string) (int64, error) {
 	return n, nil
 }
 
-// IdentityFromClaims builds the identity from a provider's claims: ASNs from
-// the ASN claim, plus the ASNs the registry lists for each mntner claim.
-// Unparseable values are ignored; an identity without any ASN is an error.
-func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.Registry) (*Identity, error) {
+// IdentityFromClaims builds the identity from a provider's claims: the ASNs
+// come from the ASN claim (the provider vouches for them). Unparseable values
+// are ignored; an identity without any ASN is an error.
+func IdentityFromClaims(p *ProviderConfig, claims map[string]any) (*Identity, error) {
 	id := &Identity{Provider: p.Name}
 	if v, ok := lookup(claims, p.Claims.Subject); ok {
 		if s := claimStrings(v); len(s) > 0 {
@@ -142,27 +140,10 @@ func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.
 		}
 	}
 	set := map[int64]bool{}
-	if p.Claims.ASN != "" {
-		if v, ok := lookup(claims, p.Claims.ASN); ok {
-			for _, s := range claimStrings(v) {
-				if n, err := parseASN(s); err == nil {
-					set[n] = true
-				}
-			}
-		}
-	}
-	if p.Claims.Mntner != "" {
-		if v, ok := lookup(claims, p.Claims.Mntner); ok {
-			for _, m := range claimStrings(v) {
-				m = strings.ToUpper(m)
-				id.Mntners = append(id.Mntners, m)
-				if reg != nil {
-					for _, n := range reg.ASNsFor(m) {
-						if peer.IsDN42ASN(n) {
-							set[n] = true
-						}
-					}
-				}
+	if v, ok := lookup(claims, p.Claims.ASN); ok {
+		for _, s := range claimStrings(v) {
+			if n, err := parseASN(s); err == nil {
+				set[n] = true
 			}
 		}
 	}
@@ -171,8 +152,7 @@ func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.
 	}
 	sort.Slice(id.ASNs, func(i, j int) bool { return id.ASNs[i] < id.ASNs[j] })
 	if len(id.ASNs) == 0 {
-		return nil, fmt.Errorf("provider %s returned no ASN for %s (claims checked: asn=%q mntner=%q)",
-			p.Name, id.Subject, p.Claims.ASN, p.Claims.Mntner)
+		return nil, fmt.Errorf("provider %s returned no DN42 ASN for %s in claim %q", p.Name, id.Subject, p.Claims.ASN)
 	}
 	return id, nil
 }

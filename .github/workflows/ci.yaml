@@ -234,7 +234,6 @@ jobs:
           helm template t charts/dn42-autopeer \
             | kubeconform -strict -summary -schema-location default -
           helm template t charts/dn42-autopeer \
-            --set gitSync.enabled=true --set gitSync.username=example \
             --set config.kubernetes.enabled=true --set config.kubernetes.namespace=dn42-router \
             | kubeconform -strict -summary -schema-location default -
 
@@ -260,7 +259,6 @@ jobs:
           for args in \
             "--set replicaCount=2" \
             "--set existingSecret=" \
-            "--set gitSync.enabled=true" \
             "--set config.kubernetes.enabled=true --set config.kubernetes.namespace=dn42"
           do
             # shellcheck disable=SC2086

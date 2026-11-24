@@ -55,11 +55,11 @@ func run() int {
 	case *registryDir != "" && *asnList != "":
 		return fail("use --registry-dir or --asn-list, not both")
 	case *registryDir != "":
-		r := &registry.Registry{Path: *registryDir}
-		if err := r.Load(); err != nil {
+		s, err := registry.LoadDir(*registryDir)
+		if err != nil {
 			return fail("%v", err)
 		}
-		opt.Registry = r
+		opt.Registry = s
 	case *asnList != "":
 		s, err := registry.LoadList(*asnList)
 		if err != nil {

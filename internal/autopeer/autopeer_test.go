@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
-	"github.com/oscrx/dn42-operator/internal/registry"
 )
 
 const (
@@ -31,57 +30,14 @@ func testConfig(t *testing.T, providers ...ProviderConfig) *Config {
 		Router:    RouterConfig{ASN: 4242423818, Name: "oscrx", EndpointHost: "2001:db8::4242", PublicKey: ourPub},
 		Providers: providers,
 	}
-	for _, p := range providers {
-		if p.Claims.Mntner != "" {
-			c.Registry.Path = "/registry" // the tests pass testRegistry to the server
-		}
-	}
 	if err := c.complete(); err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-func testRegistry(t *testing.T) *registry.Registry {
-	t.Helper()
-	dir := filepath.Join(t.TempDir(), "data", "aut-num")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		"AS4242420001": "aut-num:            AS4242420001\nas-name:            A\nmnt-by:             FOO-MNT\nsource:             DN42\n",
-		"AS4242420002": "aut-num:            AS4242420002\nmnt-by:             foo-mnt\nmnt-by:             BAR-MNT\n",
-		"AS4242420003": "aut-num:            AS4242420003\nmnt-by:             BAR-MNT\n",
-		"README":       "mnt-by: FOO-MNT\n",
-	}
-	for n, c := range files {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte(c), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	r := &registry.Registry{Path: filepath.Dir(filepath.Dir(dir))}
-	if err := r.Load(); err != nil {
-		t.Fatal(err)
-	}
-	return r
-}
-
-func TestRegistry(t *testing.T) {
-	r := testRegistry(t)
-	if got := r.ASNsFor("Foo-Mnt"); len(got) != 2 || got[0] != 4242420001 || got[1] != 4242420002 {
-		t.Errorf("FOO-MNT: %v", got)
-	}
-	if got := r.ASNsFor("BAR-MNT"); len(got) != 2 {
-		t.Errorf("BAR-MNT: %v", got)
-	}
-	if !r.Exists(4242420003) || r.Exists(4242429999) {
-		t.Error("Exists")
-	}
-}
-
 func TestIdentityFromClaims(t *testing.T) {
-	reg := testRegistry(t)
-	p := &ProviderConfig{Name: "x", Claims: ClaimsConfig{Subject: "sub", ASN: "dn42.asn", Mntner: "mnt"}}
+	p := &ProviderConfig{Name: "x", Claims: ClaimsConfig{Subject: "sub", ASN: "dn42.asn"}}
 	cases := []struct {
 		claims map[string]any
 		want   []int64
@@ -90,12 +46,9 @@ func TestIdentityFromClaims(t *testing.T) {
 		{map[string]any{"sub": "u", "dn42": map[string]any{"asn": float64(4242423914)}}, []int64{4242423914}},
 		{map[string]any{"sub": "u", "dn42": map[string]any{"asn": []any{"4242420010", "AS4242420011", "13335"}}}, []int64{4242420010, 4242420011}},
 		{map[string]any{"sub": "u", "dn42": map[string]any{"asn": "AS4242420010, AS4242420011"}}, []int64{4242420010, 4242420011}},
-		{map[string]any{"sub": "u", "mnt": "foo-mnt"}, []int64{4242420001, 4242420002}},
-		{map[string]any{"sub": "u", "mnt": []any{"FOO-MNT", "BAR-MNT"}, "dn42": map[string]any{"asn": "4242420001"}},
-			[]int64{4242420001, 4242420002, 4242420003}},
 	}
 	for i, c := range cases {
-		id, err := IdentityFromClaims(p, c.claims, reg)
+		id, err := IdentityFromClaims(p, c.claims)
 		if err != nil {
 			t.Errorf("%d: %v", i, err)
 			continue
@@ -110,20 +63,20 @@ func TestIdentityFromClaims(t *testing.T) {
 			}
 		}
 	}
-	if _, err := IdentityFromClaims(p, map[string]any{"sub": "u", "mnt": "NOBODY-MNT"}, reg); err == nil {
+	if _, err := IdentityFromClaims(p, map[string]any{"sub": "u", "mnt": "FOO-MNT"}); err == nil {
 		t.Error("identity without ASN accepted")
 	}
-	if _, err := IdentityFromClaims(p, map[string]any{"dn42": map[string]any{"asn": "4242420001"}}, reg); err == nil {
+	if _, err := IdentityFromClaims(p, map[string]any{"dn42": map[string]any{"asn": "4242420001"}}); err == nil {
 		t.Error("identity without subject accepted")
 	}
-	if _, err := IdentityFromClaims(p, map[string]any{"sub": "u", "dn42": map[string]any{"asn": "13335"}}, reg); err == nil {
+	if _, err := IdentityFromClaims(p, map[string]any{"sub": "u", "dn42": map[string]any{"asn": "13335"}}); err == nil {
 		t.Error("non-DN42 ASN accepted")
 	}
 }
 
 func TestIdentityName(t *testing.T) {
 	p := &ProviderConfig{Name: "x", Claims: ClaimsConfig{Subject: "sub", Name: "dn42.active_mnt", ASN: "dn42.asn"}}
-	id, err := IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": 4242423818.0, "active_mnt": "OSCRX-MNT"}}, nil)
+	id, err := IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": 4242423818.0, "active_mnt": "OSCRX-MNT"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +87,7 @@ func TestIdentityName(t *testing.T) {
 		t.Errorf("login %q, want %q", got, want)
 	}
 	// No name claim: the subject stands in.
-	id, err = IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": "4242423818"}}, nil)
+	id, err = IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": "4242423818"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,15 +280,6 @@ func TestConfigChecks(t *testing.T) {
 		t.Error("provider without endpoints accepted")
 	}
 	c = testConfig(t)
-	c.Providers[0].Claims.Mntner = "mnt"
-	if err := c.complete(); err == nil {
-		t.Error("mntner claim without registry.path accepted")
-	}
-	c.Registry.Path = "/registry"
-	if err := c.complete(); err != nil {
-		t.Errorf("mntner claim with registry.path: %v", err)
-	}
-	c = testConfig(t)
 	c.Admin = AdminConfig{Enabled: true, Providers: []string{"nope"}}
 	if err := c.complete(); err == nil {
 		t.Error("admin.providers with an unknown provider accepted")
@@ -364,7 +308,7 @@ func TestExampleConfigParses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Providers) != 4 || c.Registry.Refresh.Duration != 10*time.Minute {
+	if len(c.Providers) != 4 || c.SessionTTL.Duration != time.Hour {
 		t.Errorf("%+v", c)
 	}
 }

@@ -148,7 +148,7 @@ func newAppCfg(t *testing.T, mut func(*Config), providers ...ProviderConfig) *ap
 		mut(cfg)
 	}
 	cookies, _ := NewCookies(make([]byte, 32), false)
-	h = NewServer(cfg, testRegistry(t), a.repo, a, cookies).Handler()
+	h = NewServer(cfg, a.repo, a, cookies).Handler()
 	jar, _ := cookiejar.New(nil)
 	a.c = &http.Client{Jar: jar, Timeout: 10 * time.Second}
 	return a
@@ -188,9 +188,9 @@ func (a *app) csrf() string {
 }
 
 func TestOIDCLoginAndSubmit(t *testing.T) {
-	idp := newFakeIdP(t, map[string]any{"dn42": map[string]any{"asn": "AS4242420010"}, "mnt": "FOO-MNT"})
+	idp := newFakeIdP(t, map[string]any{"dn42": map[string]any{"asn": []any{"AS4242420001", "AS4242420002", "AS4242420010"}}})
 	a := newApp(t, ProviderConfig{Name: "kioubit", DisplayName: "Kioubit", Issuer: idp.srv.URL, ClientID: "cid",
-		Scopes: []string{"openid"}, Claims: ClaimsConfig{ASN: "dn42.asn", Mntner: "mnt"}})
+		Scopes: []string{"openid"}, Claims: ClaimsConfig{ASN: "dn42.asn"}})
 
 	code, body := a.get("/")
 	if code != 200 || !strings.Contains(body, `href="/login/kioubit"`) {
@@ -283,10 +283,10 @@ func TestOIDCRejects(t *testing.T) {
 }
 
 func TestPlainOAuthUserinfo(t *testing.T) {
-	idp := newFakeIdP(t, map[string]any{"mntner": "BAR-MNT"})
+	idp := newFakeIdP(t, map[string]any{"asn": "AS4242420002,AS4242420003"})
 	u := idp.srv.URL
 	a := newApp(t, ProviderConfig{Name: "auth42", AuthURL: u + "/authorize", TokenURL: u + "/token", UserinfoURL: u + "/userinfo",
-		ClientID: "cid", Claims: ClaimsConfig{Mntner: "mntner"}})
+		ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}})
 	code, body := a.get("/login/auth42")
 	if code != 200 || !strings.Contains(body, "AS4242420002, AS4242420003") {
 		t.Fatalf("oauth login: %d\n%s", code, body)
