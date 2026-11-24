@@ -14,7 +14,7 @@
 # iproute2 is for debugging (ip vrf, ip -d link) and the test's VRF init
 # container.
 
-FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
+FROM docker.io/library/debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS build
 # renovate: datasource=github-tags depName=CZ-NIC/bird
 ARG BIRD_TAG=v2.20.0
 ARG BIRD_COMMIT=0355729c3a546c910e20bcde423bf36da901f8b5
@@ -35,7 +35,7 @@ RUN autoreconf -i \
  && make -s install DESTDIR=/out \
  && /out/usr/sbin/bird --version
 
-FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+FROM docker.io/library/debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 ARG BIRD_TAG
 LABEL org.opencontainers.image.title="bird2" \
       org.opencontainers.image.version="${BIRD_TAG}" \
