@@ -67,9 +67,12 @@ type RouterConfig struct {
 // for nested claims ("dn42.asn"). Values may be a number, a string
 // ("AS4242420001", "4242420001", comma or space separated) or a list.
 type ClaimsConfig struct {
-	Subject string `json:"subject"` // default "sub"
-	ASN     string `json:"asn"`     // claim with the ASNs the user may manage
-	Mntner  string `json:"mntner"`  // claim with mntner(s); ASNs come from the registry
+	Subject string `json:"subject"` // default "sub"; the stable key (rate limits)
+	// Name is shown as the user's name (page header, PR body). Empty, or
+	// missing from the claims: the subject. Never used as a key.
+	Name   string `json:"name,omitempty"`
+	ASN    string `json:"asn"`    // claim with the ASNs the user may manage
+	Mntner string `json:"mntner"` // claim with mntner(s); ASNs come from the registry
 }
 
 // ProviderConfig is one OAuth 2.0 / OpenID Connect provider.

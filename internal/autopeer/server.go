@@ -272,7 +272,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "Could not save the session.")
 		return
 	}
-	log.Info("login", "provider", name, "subject", id.Subject, "asns", id.ASNs)
+	log.Info("login", "provider", name, "subject", id.Subject, "name", id.Name, "asns", id.ASNs)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -375,15 +375,15 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Add peer AS%d %s", obj.Spec.ASN, obj.Name),
-		Body: fmt.Sprintf("Submitted through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- Listen port: %d\n- File: %#q\n",
-			obj.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, *obj.Spec.ListenPort, path),
+		Body: fmt.Sprintf("Submitted through autopeer.\n\n- ASN: AS%d\n- Login: %s\n- Listen port: %d\n- File: %#q\n",
+			obj.Spec.ASN, sess.Identity.Login(), *obj.Spec.ListenPort, path),
 	})
 	if err != nil {
 		log.Error(err, "open PR", "peer", obj.Name)
 		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
-	log.Info("peer submitted", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
+	log.Info("peer submitted", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
 	s.render(w, http.StatusOK, "done.html", map[string]any{
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
 }
@@ -458,15 +458,15 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 		Path:   path,
 		Delete: true,
 		Title:  fmt.Sprintf("Remove peer AS%d %s", target.Spec.ASN, target.Name),
-		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
-			target.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, path),
+		Body: fmt.Sprintf("Removal requested through autopeer.\n\n- ASN: AS%d\n- Login: %s\n- File: %#q\n",
+			target.Spec.ASN, sess.Identity.Login(), path),
 	})
 	if err != nil {
 		log.Error(err, "open removal PR", "peer", target.Name)
 		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
-	log.Info("peer removal requested", "peer", target.Name, "asn", target.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
+	log.Info("peer removal requested", "peer", target.Name, "asn", target.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
 	s.render(w, http.StatusOK, "removed.html", map[string]any{"Session": sess, "PR": prURL, "Name": target.Name})
 }
 
@@ -532,15 +532,15 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Update peer AS%d %s", obj.Spec.ASN, obj.Name),
-		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s (%s)\n- File: %#q\n",
-			obj.Spec.ASN, mdCode(sess.Identity.Subject), sess.Identity.Provider, path),
+		Body: fmt.Sprintf("Update requested through autopeer.\n\n- ASN: AS%d\n- Login: %s\n- File: %#q\n",
+			obj.Spec.ASN, sess.Identity.Login(), path),
 	})
 	if err != nil {
 		log.Error(err, "open update PR", "peer", obj.Name)
 		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
-	log.Info("peer update requested", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject)
+	log.Info("peer update requested", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
 	s.render(w, http.StatusOK, "done.html", map[string]any{
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
 }

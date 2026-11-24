@@ -12,6 +12,6 @@ pre{background:rgba(127,127,127,.12);padding:.75rem;border-radius:6px;overflow-x
 .err{color:var(--bad);font-weight:600}table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.35rem .5rem;border-bottom:1px solid var(--line)}
 header{display:flex;justify-content:space-between;align-items:center;gap:1rem}header form button{margin:0;background:transparent;color:var(--accent);padding:0}
 </style></head><body>
-<header><h1>AS{{.RouterASN}} autopeer</h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.Subject}}</button></form>{{end}}</header>
+<header><h1>AS{{.RouterASN}} autopeer</h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.DisplayName}}</button></form>{{end}}</header>
 {{end}}
 {{define "foot"}}</body></html>{{end}}

@@ -121,6 +121,28 @@ func TestIdentityFromClaims(t *testing.T) {
 	}
 }
 
+func TestIdentityName(t *testing.T) {
+	p := &ProviderConfig{Name: "x", Claims: ClaimsConfig{Subject: "sub", Name: "dn42.active_mnt", ASN: "dn42.asn"}}
+	id, err := IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": 4242423818.0, "active_mnt": "OSCRX-MNT"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.Subject != "e435" || id.DisplayName() != "OSCRX-MNT" {
+		t.Errorf("subject %q name %q", id.Subject, id.DisplayName())
+	}
+	if got, want := id.Login(), "`OSCRX-MNT` (x, subject `e435`)"; got != want {
+		t.Errorf("login %q, want %q", got, want)
+	}
+	// No name claim: the subject stands in.
+	id, err = IdentityFromClaims(p, map[string]any{"sub": "e435", "dn42": map[string]any{"asn": "4242423818"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.DisplayName() != "e435" || id.Login() != "`e435` (x)" {
+		t.Errorf("fallback: name %q login %q", id.DisplayName(), id.Login())
+	}
+}
+
 func TestCookies(t *testing.T) {
 	c, err := NewCookies(make([]byte, 32), true)
 	if err != nil {

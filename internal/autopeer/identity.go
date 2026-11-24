@@ -18,8 +18,26 @@ var providerNameRe = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
 type Identity struct {
 	Provider string   `json:"p"`
 	Subject  string   `json:"s"`
+	Name     string   `json:"n,omitempty"`
 	Mntners  []string `json:"m,omitempty"`
 	ASNs     []int64  `json:"a"`
+}
+
+// DisplayName is the name to show: the name claim, else the subject.
+func (id *Identity) DisplayName() string {
+	if id.Name != "" {
+		return id.Name
+	}
+	return id.Subject
+}
+
+// Login describes the identity for a PR body: the name, the provider, and
+// the subject when it differs from the name.
+func (id *Identity) Login() string {
+	if id.Name == "" || id.Name == id.Subject {
+		return fmt.Sprintf("%s (%s)", mdCode(id.Subject), id.Provider)
+	}
+	return fmt.Sprintf("%s (%s, subject %s)", mdCode(id.Name), id.Provider, mdCode(id.Subject))
 }
 
 // May reports whether the identity may manage asn.
@@ -99,6 +117,13 @@ func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.
 	}
 	if id.Subject == "" {
 		return nil, fmt.Errorf("provider %s: no %q claim", p.Name, p.Claims.Subject)
+	}
+	if p.Claims.Name != "" {
+		if v, ok := lookup(claims, p.Claims.Name); ok {
+			if s := claimStrings(v); len(s) > 0 {
+				id.Name = s[0]
+			}
+		}
 	}
 	set := map[int64]bool{}
 	if p.Claims.ASN != "" {

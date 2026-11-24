@@ -41,31 +41,32 @@ kubernetes:
   namespace: dn42-router                  # where the router chart runs (the DN42Peers)
 
 providers:
-  # Kioubit Authentication Services (AS4242423914). OIDC through its control
-  # panel; activating a domain means messaging Kioubit on IRC.
+  # Kioubit (AS4242423914), verified with a real login 2026-11-24. Register
+  # a client in its control panel at https://dn42.g-load.eu/auth/oauth/;
+  # public clients (PKCE, no secret) are allowed. sub is the mntner.
   - name: kioubit
     displayName: Kioubit
-    issuer: https://CHECK.kioubit.example     # CHECK: issuer URL
+    issuer: https://dn42.g-load.eu
     clientID: CHECK
-    clientSecretFile: /secrets/kioubit-client-secret
-    scopes: [openid]                          # CHECK: scope that releases the ASN
+    scopes: [openid, dn42]
     claims:
       subject: sub
-      asn: asn                                # CHECK: claim name and format
-      mntner: mnt                             # CHECK
+      asn: dn42.asn
 
-  # OAuth.dn42 by iedon (AS4242422189), clearnet auth.iedon.net. Self-service
-  # app registration.
+  # OAuth.dn42 by iEdon (AS4242422189), verified with a real login
+  # 2026-11-24. Self-service app registration at https://auth.iedon.net
+  # (callbacks must be https there; oauth.dn42 inside DN42 allows http).
+  # Confidential client. sub is an opaque hash, so show the mntner instead.
   - name: iedon
-    displayName: OAuth.dn42 (iedon)
-    issuer: https://auth.iedon.net            # CHECK: exact issuer (discovery path)
+    displayName: OAuth.dn42 (iEdon)
+    issuer: https://auth.iedon.net
     clientID: CHECK
     clientSecretFile: /secrets/iedon-client-secret
-    scopes: [openid, profile]                 # CHECK
-    useUserinfo: true                         # CHECK: ASN may only be in userinfo
+    scopes: [openid, dn42]
     claims:
-      asn: asn                                # CHECK
-      mntner: mntner                          # CHECK
+      subject: sub
+      name: dn42.active_mnt
+      asn: dn42.asn
 
   # HExpNetwork WebAuth (AS4242420298). Registration and claims unknown.
   - name: hexp
@@ -77,10 +78,10 @@ providers:
       asn: asn                                # CHECK
       mntner: mnt                             # CHECK
 
-  # Auth42 by burble. Possibly plain OAuth 2.0 without OIDC; then the
-  # identity comes from the userinfo endpoint.
-  - name: auth42
-    displayName: Auth42 (burble)
+  # Plain OAuth 2.0 without OIDC: the identity comes from the userinfo
+  # endpoint. (Auth42 turned out to be iEdon's OAuth.dn42, above.)
+  - name: plainoauth
+    displayName: Some plain OAuth provider
     authURL: https://CHECK.burble.example/authorize   # CHECK
     tokenURL: https://CHECK.burble.example/token      # CHECK
     userinfoURL: https://CHECK.burble.example/userinfo # CHECK
