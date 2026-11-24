@@ -1,8 +1,10 @@
 {{define "done.html"}}{{template "head" .}}
+<section class="card">
 <h2>Submitted</h2>
 <p>Your request is in <a href="{{.PR}}">this pull request</a>. Once the checks pass it is merged and the tunnel and session come up on our side within a few minutes. Check back here for its status.</p>
 {{with .Side}}<h2>WireGuard</h2><pre>{{.WireGuard}}</pre>
 <h2>BIRD</h2><pre>{{.BIRD}}</pre>{{else}}<p>This peering uses its own key on our side, not the shared one, so our side of the config is unchanged; only the fields above change.</p>{{end}}
 <h2>Peer file</h2><pre>{{.File}}</pre>
 <p><a href="/">Back</a></p>
+</section>
 {{template "foot" .}}{{end}}

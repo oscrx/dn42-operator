@@ -90,6 +90,10 @@ type ClaimsConfig struct {
 type ProviderConfig struct {
 	Name        string `json:"name"` // in URLs: ^[a-z0-9]+$
 	DisplayName string `json:"displayName"`
+	// Icon for the login button, as a data:image/ URI (so visitors' browsers
+	// fetch nothing from the provider before they choose it). Empty: the
+	// first letter of the display name.
+	Icon string `json:"icon,omitempty"`
 	// Issuer enables OpenID Connect discovery and ID token verification.
 	// Without it, AuthURL/TokenURL/UserinfoURL are used (plain OAuth 2.0).
 	Issuer      string `json:"issuer,omitempty"`
@@ -270,6 +274,9 @@ func (c *Config) complete() error {
 		}
 		if p.ClientID == "" {
 			return fmt.Errorf("provider %s: clientID is required", p.Name)
+		}
+		if p.Icon != "" && !strings.HasPrefix(p.Icon, "data:image/") {
+			return fmt.Errorf("provider %s: icon must be a data:image/ URI", p.Name)
 		}
 		if p.Issuer == "" && (p.AuthURL == "" || p.TokenURL == "" || p.UserinfoURL == "") {
 			return fmt.Errorf("provider %s: set issuer (OIDC) or authURL, tokenURL and userinfoURL (OAuth)", p.Name)

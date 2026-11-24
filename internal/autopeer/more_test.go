@@ -268,3 +268,21 @@ func TestHostIssuers(t *testing.T) {
 		t.Errorf("valid hostIssuers: %v", err)
 	}
 }
+
+func TestLoginButtons(t *testing.T) {
+	icon := "data:image/png;base64,iVBORw0KGgo="
+	a := newApp(t,
+		ProviderConfig{Name: "a", DisplayName: "Alpha", Icon: icon, Issuer: "http://unused", ClientID: "c", Claims: ClaimsConfig{ASN: "asn"}},
+		ProviderConfig{Name: "b", DisplayName: "beta", Issuer: "http://unused", ClientID: "c", Claims: ClaimsConfig{ASN: "asn"}})
+	_, body := a.get("/")
+	for _, want := range []string{`<img src="` + icon + `"`, "Log in with Alpha", `<span class="initial">B</span>Log in with beta`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("no %q in:\n%s", want, body)
+		}
+	}
+	c := testConfig(t)
+	c.Providers[0].Icon = "https://provider.example/logo.png"
+	if err := c.complete(); err == nil {
+		t.Error("non-data icon accepted")
+	}
+}

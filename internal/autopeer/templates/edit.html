@@ -1,4 +1,5 @@
 {{define "edit.html"}}{{template "head" .}}
+<section class="card">
 <h2>Edit {{.Peer.Name}} (AS{{.Peer.Spec.ASN}})</h2>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
 <p>Name, ASN and our port stay the same. The change goes through a pull request like a new peering.</p>
@@ -10,4 +11,5 @@
 <label for="neighbor">Your link-local address</label><input id="neighbor" name="neighbor" value="{{index .Form "neighbor"}}" required>
 <button>Submit change</button>
 </form>
+</section>
 {{template "foot" .}}{{end}}

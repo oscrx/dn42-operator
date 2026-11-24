@@ -54,6 +54,9 @@ providers:
   # public clients (PKCE, no secret) are allowed. sub is the mntner.
   - name: kioubit
     displayName: Kioubit
+    # Login button icon, a data:image/ URI (e.g. the logo from Kioubit's
+    # official auth button); without one the button shows a letter.
+    # icon: data:image/svg+xml;base64,...
     issuer: https://dn42.g-load.eu
     clientID: CHECK
     scopes: [openid, dn42]

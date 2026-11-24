@@ -1,4 +1,5 @@
 {{define "form.html"}}{{template "head" .}}
+<section class="card">
 <h2>New peering</h2>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
 <form method="post" action="/peer">
@@ -17,4 +18,5 @@
 <small>Used as the BGP neighbor. Ours is shown after submitting.</small>
 <button>Submit</button>
 </form>
+</section>
 {{template "foot" .}}{{end}}

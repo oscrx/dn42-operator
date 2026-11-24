@@ -82,7 +82,7 @@ func (s *Server) Handler() http.Handler {
 
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		h.ServeHTTP(w, r)
@@ -110,14 +110,19 @@ func (s *Server) session(r *http.Request) *Session {
 	return &sess
 }
 
-type providerLink struct{ Name, DisplayName string }
+type providerLink struct {
+	Name, DisplayName, Initial string
+	Icon                       template.URL // validated data:image/ URI
+}
 
 func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 	sess := s.session(r)
 	if sess == nil {
 		var ps []providerLink
 		for i := range s.Cfg.Providers {
-			ps = append(ps, providerLink{s.Cfg.Providers[i].Name, s.Cfg.Providers[i].DisplayName})
+			p := &s.Cfg.Providers[i]
+			ps = append(ps, providerLink{Name: p.Name, DisplayName: p.DisplayName,
+				Initial: strings.ToUpper(p.DisplayName[:1]), Icon: template.URL(p.Icon)}) //nolint:gosec // checked in Config.complete
 		}
 		s.render(w, http.StatusOK, "login.html", map[string]any{"Providers": ps})
 		return
