@@ -74,7 +74,7 @@ bird:
     # The BIRD version (ghcr.io/oscrx/bird2 follows BIRD, not this chart).
     # Renovate keeps tag and digest current.
     tag: "2.20.0"
-    digest: "sha256:53a4693a592e707f9dbb69163da01a75b5ea0f22fe6e50b3a05dae76573b9b7a"
+    digest: "sha256:f8921aad7a9b9d17227a2ba33d53ac6390c228c3a6cd9c8f9bed260398cf503d"
     pullPolicy: IfNotPresent
 
   # bird.conf, from the bird.conf key of a ConfigMap. It must define the
