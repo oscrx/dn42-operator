@@ -147,9 +147,20 @@ jobs:
   # only once the image is pushed. Failing here leaves a published image with
   # no chart, which a re-run fixes; the reverse would not be recoverable.
   chart:
-    name: Package and push the chart
+    name: Package and push the ${{ matrix.chart }} chart
     needs: image
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # values: the image block's digest line (indent differs per chart).
+          - chart: dn42-operator
+            image: dn42-operator
+            digestIndent: "    "
+          - chart: dn42-autopeer
+            image: dn42-autopeer
+            digestIndent: "  "
     permissions:
       contents: read
       packages: write
@@ -181,10 +192,12 @@ jobs:
       # The image job is a matrix, so its digest is looked up from the tag it
       # just pushed (and checked against its signature) rather than passed on.
       # Written into the working copy only: the repository keeps it empty.
-      - name: Pin the published operator image digest into the chart
+      - name: Pin the published image digest into the chart
         env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/dn42-operator
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
           REPO: ${{ github.repository }}
+          CHART: ${{ matrix.chart }}
+          INDENT: ${{ matrix.digestIndent }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           digest=$(docker buildx imagetools inspect "${IMAGE}:${version}" --format '{{json .Manifest}}' | jq -r .digest)
@@ -192,11 +205,12 @@ jobs:
           cosign verify "${IMAGE}@${digest}" \
             --certificate-identity "https://github.com/${REPO}/.github/workflows/release.yaml@${GITHUB_REF}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
-          values=charts/dn42-operator/values.yaml
-          # Only the operator's digest is empty; the BIRD image's is pinned.
-          sed -i "s|^    digest: \"\"$|    digest: \"${digest}\"|" "$values"
-          grep -q "^    digest: \"${digest}\"$" "$values"
-          helm template t charts/dn42-operator | grep -F "dn42-operator@${digest}"
+          values="charts/${CHART}/values.yaml"
+          # Only the chart's own image digest is empty (dn42-operator also
+          # pins BIRD, by tag and digest).
+          sed -i "s|^${INDENT}digest: \"\"$|${INDENT}digest: \"${digest}\"|" "$values"
+          grep -q "^${INDENT}digest: \"${digest}\"$" "$values"
+          helm template t "charts/${CHART}" | grep -F "${IMAGE#ghcr.io/*/}@${digest}"
           echo "IMAGE_DIGEST=${digest}" >> "$GITHUB_ENV"
 
       - name: Package and push the chart
@@ -205,22 +219,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ACTOR: ${{ github.actor }}
           OWNER: ${{ github.repository_owner }}
+          CHART: ${{ matrix.chart }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          declared=$(helm show chart charts/dn42-operator | awk '$1=="version:"{print $2}')
+          declared=$(helm show chart "charts/${CHART}" | awk '$1=="version:"{print $2}')
           if [ "$declared" != "$version" ]; then
             echo "Chart.yaml version ($declared) does not match the tag ($version); bump the chart before tagging."
             exit 1
           fi
 
           helm registry login ghcr.io -u "$ACTOR" --password-stdin <<<"$GH_TOKEN"
-          helm package charts/dn42-operator --destination dist
-          helm push "dist/dn42-operator-${version}.tgz" \
+          helm package "charts/${CHART}" --destination dist
+          helm push "dist/${CHART}-${version}.tgz" \
             "oci://ghcr.io/${OWNER}/charts" 2>&1 | tee push.log
 
           digest=$(grep -oE 'sha256:[a-f0-9]{64}' push.log | head -1)
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
-          echo "ref=ghcr.io/${OWNER}/charts/dn42-operator" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/${OWNER}/charts/${CHART}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Sign the chart
@@ -236,7 +251,7 @@ jobs:
           CHART_DIGEST: ${{ steps.chart.outputs.digest }}
         run: |
           {
-            echo "### Chart"
+            echo "### Chart ${CHART_REF##*/}"
             echo
             echo '```'
             echo "helm template dn42 oci://${CHART_REF} --version ${CHART_VERSION}"
@@ -244,7 +259,7 @@ jobs:
             echo
             echo "Digest: \`${CHART_DIGEST}\`"
             echo
-            echo "Pins dn42-operator image digest \`${IMAGE_DIGEST}\`"
+            echo "Pins image digest \`${IMAGE_DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # Last, so a release page only appears once everything it points at exists.

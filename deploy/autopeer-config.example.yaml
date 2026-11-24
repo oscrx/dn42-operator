@@ -35,7 +35,7 @@ github:
 
 kubernetes:
   enabled: true                          # status page; read-only on dn42peers
-  namespace: dn42
+  namespace: dn42-router                  # where the router chart runs (the DN42Peers)
 
 providers:
   # Kioubit Authentication Services (AS4242423914). OIDC through its control

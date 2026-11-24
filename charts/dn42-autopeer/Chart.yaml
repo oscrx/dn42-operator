@@ -1,0 +1,28 @@
+apiVersion: v2
+name: dn42-autopeer
+description: Self-service DN42 peering - log in with a DN42 identity provider, prove ASN ownership, get a PR in the peers repo
+type: application
+# Chart version tracks the application release; they are bumped together.
+version: 0.3.0
+appVersion: "0.3.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/oscrx/dn42-operator
+sources:
+  - https://github.com/oscrx/dn42-operator
+keywords:
+  - dn42
+  - peering
+maintainers:
+  - name: oscrx
+    url: https://github.com/oscrx
+annotations:
+  artifacthub.io/license: MIT
+  artifacthub.io/prerelease: "false"
+  artifacthub.io/images: |
+    - name: dn42-autopeer
+      image: ghcr.io/oscrx/dn42-autopeer:0.3.0
+  artifacthub.io/links: |
+    - name: source
+      url: https://github.com/oscrx/dn42-operator
+    - name: support
+      url: https://github.com/oscrx/dn42-operator/issues

@@ -263,10 +263,16 @@ They need `--privileged` and must not run on a host.
 `ghcr.io/oscrx/dn42-autopeer`: distroless nonroot, with only the autopeer
 binary in it. It is the one public-facing part, so it runs with the least
 privilege: its own namespace with PodSecurity `restricted`, and read-only
-access to `dn42peers` in `dn42` for the status page. It never writes to the
-cluster; changes go out as PRs. Example config: `deploy/autopeer-config.example.yaml`.
-Example namespace, Deployment (with a git-sync sidecar for the registry)
-and RBAC: `deploy/autopeer.yaml`.
+access to `dn42peers` in the router's namespace for the status page. It never
+writes to the cluster; changes go out as PRs.
+
+The Helm chart `charts/dn42-autopeer` (`oci://ghcr.io/oscrx/charts/dn42-autopeer`,
+signed) installs the Deployment (with an optional git-sync sidecar for the
+registry), its Service and ConfigMap, and the read-only Role in
+`peersNamespace`. The config is `config:` in the values, rendered as-is; see
+`deploy/autopeer-config.example.yaml`. Secrets come from `existingSecret`,
+mounted at `/secrets`. Routing (Gateway/Ingress, certificates) is left to
+you, or to `extraObjects`.
 
 The flow:
 

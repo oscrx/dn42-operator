@@ -32,9 +32,10 @@ flowchart LR
 Runs on a `v*` tag, or by hand through `workflow_dispatch`. The tests run
 first, without any cache, so nothing a pull request could have written ends
 up in a signed image. The two images are built and signed in parallel.
-The chart follows the operator image: its version must equal the tag, and
+Each chart follows its image: its version must equal the tag, and
 the image digest is written into it before it is packaged, so a chart
-always points at the exact image of its release. The GitHub release comes
+always points at the exact image of its release. Both charts are
+released with every tag. The GitHub release comes
 last, so its page only appears once everything it points to exists. The tag is also what the peers repo's gate installs
 (`go install …/cmd/peercheck@<tag>`).
 
@@ -49,8 +50,9 @@ flowchart TD
     test["<b>Test</b><br/>go test -race, integration tests<br/>(no cache)"]
     test --> operator["<b>dn42-operator</b><br/>root, privileged on the router"]
     test --> autopeer["<b>dn42-autopeer</b><br/>nonroot, only the web app"]
-    operator --> chart["<b>Chart</b><br/>operator digest pinned in,<br/>pushed to oci://ghcr.io/oscrx/charts, signed"]
-    operator & autopeer & chart --> release["<b>GitHub release</b><br/>generated notes (tags only)"]
+    operator --> chart["<b>Chart dn42-operator</b><br/>operator digest pinned in,<br/>pushed to oci://ghcr.io/oscrx/charts, signed"]
+    autopeer --> chart2["<b>Chart dn42-autopeer</b><br/>autopeer digest pinned in,<br/>pushed and signed"]
+    operator & autopeer & chart & chart2 --> release["<b>GitHub release</b><br/>generated notes (tags only)"]
 ```
 
 Each image is multi-arch, pushed to ghcr.io with SBOM and provenance, and

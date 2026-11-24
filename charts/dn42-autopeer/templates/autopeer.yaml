@@ -1,0 +1,174 @@
+{{- include "dn42-autopeer.validate" . -}}
+# The public web front end, so least privilege: nonroot, read-only root,
+# no capabilities, and no write access to the cluster. Changes go out as PRs
+# through the GitHub App.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dn42-autopeer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-autopeer.labels" . | nindent 4 }}
+# Only the status page talks to the API (read-only, in peersNamespace).
+automountServiceAccountToken: {{ and (not (empty .Values.peersNamespace)) (dig "kubernetes" "enabled" false .Values.config) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dn42-autopeer-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-autopeer.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- toYaml .Values.config | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dn42-autopeer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-autopeer.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "dn42-autopeer.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: http, port: {{ .Values.service.port }}, targetPort: http}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dn42-autopeer
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dn42-autopeer.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Rate limits are in memory: never two pods at once.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      {{- include "dn42-autopeer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dn42-autopeer.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        # Roll the pod when the config changes (it is read at start).
+        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: dn42-autopeer
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: autopeer
+          image: {{ include "dn42-autopeer.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [--config=/etc/autopeer/config.yaml]
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: &locked
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: config, mountPath: /etc/autopeer, readOnly: true}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+            {{- if .Values.gitSync.enabled }}
+            - {name: registry, mountPath: /registry-root, readOnly: true}
+            {{- end }}
+        {{- if .Values.gitSync.enabled }}
+        - name: git-sync
+          image: "{{ .Values.gitSync.image.repository }}:{{ .Values.gitSync.image.tag }}"
+          imagePullPolicy: {{ .Values.gitSync.image.pullPolicy }}
+          args:
+            - --repo={{ .Values.gitSync.repo }}
+            - --root=/registry-root
+            - --link=registry
+            - --period={{ .Values.gitSync.period }}
+            - --depth=1
+            - --username={{ .Values.gitSync.username }}
+            - --password-file=/secrets/registry-token
+          {{- with .Values.gitSync.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext: *locked
+          volumeMounts:
+            - {name: registry, mountPath: /registry-root}
+            - {name: tmp, mountPath: /tmp}
+            - {name: secrets, mountPath: /secrets, readOnly: true}
+        {{- end }}
+      volumes:
+        - name: config
+          configMap: {name: dn42-autopeer-config}
+        - name: secrets
+          secret: {secretName: {{ .Values.existingSecret }}}
+        {{- if .Values.gitSync.enabled }}
+        - {name: registry, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+        {{- end }}
+{{- with .Values.peersNamespace }}
+---
+# In the peers namespace: read DN42Peer objects for the status page, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dn42-autopeer-read-peers
+  namespace: {{ . }}
+  labels:
+    {{- include "dn42-autopeer.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [dn42.oscarr.nl]
+    resources: [dn42peers]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dn42-autopeer-read-peers
+  namespace: {{ . }}
+  labels:
+    {{- include "dn42-autopeer.labels" $ | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dn42-autopeer-read-peers
+subjects:
+  - kind: ServiceAccount
+    name: dn42-autopeer
+    namespace: {{ $.Release.Namespace }}
+{{- end }}

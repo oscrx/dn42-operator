@@ -228,8 +228,18 @@ jobs:
             -f test/k3s/values.yaml \
             | kubeconform -strict -summary -schema-location default -schema-location "$K8S_SCHEMAS" -
 
+      - name: Lint, render and validate the autopeer chart
+        run: |
+          helm lint charts/dn42-autopeer
+          helm template t charts/dn42-autopeer \
+            | kubeconform -strict -summary -schema-location default -
+          helm template t charts/dn42-autopeer \
+            --set gitSync.enabled=true --set gitSync.username=example \
+            --set config.kubernetes.enabled=true --set config.kubernetes.namespace=dn42-router \
+            | kubeconform -strict -summary -schema-location default -
+
       - name: Guards reject invalid configurations
-        # The chart fails fast on values that would misbehave at runtime.
+        # The charts fail fast on values that would misbehave at runtime.
         # Assert they still do, so a template refactor cannot quietly drop them.
         run: |
           set +e
@@ -246,6 +256,19 @@ jobs:
               exit 1
             fi
             echo "guard fired for: $args"
+          done
+          for args in \
+            "--set replicaCount=2" \
+            "--set existingSecret=" \
+            "--set gitSync.enabled=true" \
+            "--set config.kubernetes.enabled=true --set config.kubernetes.namespace=dn42"
+          do
+            # shellcheck disable=SC2086
+            if helm template t charts/dn42-autopeer $args >/dev/null 2>&1; then
+              echo "guard did not fire for (autopeer): $args"
+              exit 1
+            fi
+            echo "guard fired for (autopeer): $args"
           done
 
   integration:
