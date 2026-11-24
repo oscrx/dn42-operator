@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
 #   --target autopeer  the public web front end: nonroot, nothing else inside
 #   (default)          dn42-operator: root, because it needs netlink, wgctrl
 #                      and /proc/sys in the host network namespace
-FROM gcr.io/distroless/static:nonroot@sha256:aafe993665bf6200db38a02c11a9351e782a84b6a45e7f33b6695638c88e3931 AS autopeer
+FROM gcr.io/distroless/static:nonroot@sha256:8ce6dd87e9823c5b48dcfb2c8604714ccb351ce59607327bcc4957448da279b5 AS autopeer
 COPY --from=build /out/autopeer /autopeer
 USER 65532:65532
 ENTRYPOINT ["/autopeer"]
