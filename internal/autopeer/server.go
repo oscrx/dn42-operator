@@ -131,7 +131,8 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	peers, err := s.ownPeers(r.Context(), &sess.Identity)
-	data := map[string]any{"Session": sess, "Peers": peers}
+	data := map[string]any{"Session": sess, "Peers": peers,
+		"LG": s.Cfg.LookingGlassFor(r.Host), "LGServer": s.Cfg.LookingGlass.Server}
 	if err != nil {
 		data["Error"] = "Could not load your peers right now."
 		ctrl.Log.WithName("autopeer").Error(err, "list peers")
@@ -546,7 +547,8 @@ func (s *Server) editPeerForm(w http.ResponseWriter, r *http.Request) {
 // renderEdit shows a peering: its details and the peer's config as it is
 // now, then the edit form.
 func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, status int, sess *Session, target *dn42v1.DN42Peer, form map[string]string, errMsg string) {
-	data := map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": errMsg}
+	data := map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": errMsg,
+		"LG": s.Cfg.LookingGlassFor(r.Host), "LGServer": s.Cfg.LookingGlass.Server}
 	if p, verr := peer.FromObject(target); verr == nil {
 		data["Our"] = p
 		data["OurEndpoint"] = joinHostPort(s.Cfg.Router.EndpointHost, p.ListenPort)

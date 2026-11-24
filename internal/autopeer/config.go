@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -41,6 +42,29 @@ type Config struct {
 	GitHub     GitHubConfig     `json:"github"`
 	Kubernetes KubeConfig       `json:"kubernetes"`
 	Admin      AdminConfig      `json:"admin"`
+	// LookingGlass links each peering to its session in a bird-lg-go
+	// looking glass. Optional.
+	LookingGlass LookingGlassConfig `json:"lookingGlass"`
+}
+
+// LookingGlassConfig points at a bird-lg-go instance.
+type LookingGlassConfig struct {
+	URL    string `json:"url,omitempty"`    // e.g. https://lg.example.net
+	Server string `json:"server,omitempty"` // its name for this router (BIRDLG_SERVERS)
+	// HostURLs is the looking glass to link to from one of our public
+	// hosts, e.g. its .dn42 name from the .dn42 host. Others use URL.
+	HostURLs map[string]string `json:"hostURLs,omitempty"`
+}
+
+// LookingGlassFor is the looking glass base URL for pages on host ("" when
+// none is configured).
+func (c *Config) LookingGlassFor(host string) string {
+	for h, u := range c.LookingGlass.HostURLs {
+		if strings.EqualFold(h, host) {
+			return u
+		}
+	}
+	return c.LookingGlass.URL
 }
 
 // AdminConfig makes logins for the router's own ASN admins: they may add,
@@ -297,9 +321,21 @@ func (c *Config) complete() error {
 			if !c.isPublicHost(h) {
 				return fmt.Errorf("provider %s: hostIssuers: %q is not the host of publicURL or extraPublicURLs", p.Name, h)
 			}
-			if u, err := url.Parse(iss); err != nil || u.Scheme != "https" || u.Host == "" {
+			if !isHTTPS(iss) {
 				return fmt.Errorf("provider %s: hostIssuers[%s]: %q is not an https URL", p.Name, h, iss)
 			}
+		}
+	}
+	if lg := &c.LookingGlass; lg.URL != "" || len(lg.HostURLs) > 0 {
+		if !isHTTPS(lg.URL) || !lgServerRe.MatchString(lg.Server) {
+			return fmt.Errorf("lookingGlass: set url (https) and server")
+		}
+		lg.URL = strings.TrimRight(lg.URL, "/")
+		for h, u := range lg.HostURLs {
+			if !c.isPublicHost(h) || !isHTTPS(u) {
+				return fmt.Errorf("lookingGlass.hostURLs: %q must be one of our hosts, mapped to an https URL", h)
+			}
+			lg.HostURLs[h] = strings.TrimRight(u, "/")
 		}
 	}
 	for _, n := range c.Admin.Providers {
@@ -337,6 +373,14 @@ func (c *Config) IsAdmin(id *Identity) bool {
 		}
 	}
 	return false
+}
+
+// lgServerRe is a looking glass server name: one URL path segment.
+var lgServerRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,63}$`)
+
+func isHTTPS(u string) bool {
+	pu, err := url.Parse(u)
+	return err == nil && pu.Scheme == "https" && pu.Host != ""
 }
 
 func (c *Config) isPublicHost(host string) bool {

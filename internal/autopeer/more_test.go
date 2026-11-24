@@ -2,6 +2,7 @@ package autopeer
 
 import (
 	"html"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -350,5 +351,54 @@ func TestPeerDetailsAndMTU(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("details page has no %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestLookingGlassLinks(t *testing.T) {
+	a := loggedIn(t, func(c *Config) {
+		c.ExtraPublicURLs = []string{"https://autopeer.oscrx.dn42"}
+		c.LookingGlass = LookingGlassConfig{URL: "https://lg.example.net", Server: "nl-hou01",
+			HostURLs: map[string]string{"autopeer.oscrx.dn42": "https://lg.oscrx.dn42"}}
+	})
+	p := existingPeer("mine", 4242420010, 20010, "fe80::1")
+	b, _ := PeerYAML(&p)
+	a.repo.Files[PeerFileName("peers", &p)] = b
+	live := p
+	live.Status.BGPState = "Established"
+	a.live = []dn42v1.DN42Peer{live}
+	if _, body := a.get("/"); !strings.Contains(body, `href="https://lg.example.net/detail/nl-hou01/peer_mine"`) {
+		t.Errorf("home has no session link:\n%s", body)
+	}
+	_, body := a.get("/peer/edit?name=mine")
+	for _, want := range []string{"/detail/nl-hou01/peer_mine", "/route_from_protocol/nl-hou01/peer_mine", "/whois/AS4242420010"} {
+		if !strings.Contains(body, `href="https://lg.example.net`+want+`"`) {
+			t.Errorf("details page has no %s link", want)
+		}
+	}
+	// The .dn42 host links to the .dn42 looking glass.
+	req, _ := http.NewRequest(http.MethodGet, a.srv.URL+"/peer/edit?name=mine", nil)
+	req.Host = "autopeer.oscrx.dn42"
+	for _, c := range a.c.Jar.Cookies(req.URL) {
+		req.AddCookie(c)
+	}
+	resp, err := a.c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	bb, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(bb), `href="https://lg.oscrx.dn42/detail/nl-hou01/peer_mine"`) {
+		t.Errorf(".dn42 host doesn't link the .dn42 looking glass:\n%s", bb)
+	}
+
+	c := testConfig(t)
+	c.LookingGlass = LookingGlassConfig{URL: "https://lg.example.net"}
+	if err := c.complete(); err == nil {
+		t.Error("looking glass without server accepted")
+	}
+	c = testConfig(t)
+	c.LookingGlass = LookingGlassConfig{URL: "http://lg.example.net", Server: "x"}
+	if err := c.complete(); err == nil {
+		t.Error("non-https looking glass accepted")
 	}
 }

@@ -2,6 +2,7 @@
 <section class="card">
 <h2>{{.Peer.Name}} <span class="muted">AS{{.Peer.Spec.ASN}}</span></h2>
 {{with .Live}}<p>{{if eq .Status.BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .Status.BGPState "not up yet"}}</span>{{end}}{{with .Status.RoutesImported}} {{.}} routes{{end}}</p>{{end}}
+{{with .LG}}<p>Looking glass: <a href="{{.}}/detail/{{$.LGServer}}/peer_{{$.Peer.Name}}">session</a> · <a href="{{.}}/route_from_protocol/{{$.LGServer}}/peer_{{$.Peer.Name}}">routes</a> · <a href="{{.}}/whois/AS{{$.Peer.Spec.ASN}}">whois AS{{$.Peer.Spec.ASN}}</a></p>{{end}}
 {{with .Our}}<table class="kv">
 <tr><th>Our endpoint</th><td><code>{{$.OurEndpoint}}</code> (IPv6 only)</td></tr>
 <tr><th>Our link-local</th><td><code>{{$.OurLinkLocal}}</code></td></tr>

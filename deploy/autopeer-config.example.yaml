@@ -40,6 +40,14 @@ kubernetes:
   enabled: true                          # status page; read-only on dn42peers
   namespace: dn42-router                  # where the router chart runs (the DN42Peers)
 
+# Links each peering to its session in a bird-lg-go looking glass
+# (BIRDLG_SERVERS name as server); the .dn42 host links the .dn42 one.
+lookingGlass:
+  url: https://lg.dn42.oscarr.nl
+  server: nl-hou01
+  hostURLs:
+    autopeer.oscrx.dn42: https://lg.oscrx.dn42
+
 # Logins showing router.asn become admins: add, edit and remove peerings for
 # any DN42 ASN (except router.asn itself), through the same auto-merging PRs.
 # Off by default; an admin login is only as trustworthy as every provider

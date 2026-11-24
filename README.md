@@ -302,7 +302,9 @@ The flow:
    new ones still in an open PR. It shows live state (BGP state, handshake,
    routes, Valid) from the cluster when `kubernetes.enabled`. Each peering
    has a page with its details and the peer's config, our key taken from
-   `status.publicKey` (the shared key until it is live).
+   `status.publicKey` (the shared key until it is live), and with
+   `lookingGlass` set, links to the session, its routes and the ASN's whois
+   in a bird-lg-go looking glass.
 6. **Edit and removal**: every peering of an ASN you may manage gets Edit
    and Remove buttons. Edit changes only the peer's own fields (public key,
    endpoint, link-local address), keeping name, ASN, our port, link values
