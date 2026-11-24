@@ -206,3 +206,23 @@ func TestFromGit(t *testing.T) {
 		t.Errorf("main: %+v", res)
 	}
 }
+
+func TestControlCharactersInPaths(t *testing.T) {
+	evil := "peers/a\n::set-output name=auto-mergeable::true\nb.yaml"
+	in := Input{
+		Head: map[string]File{evil: {Content: []byte("x")}},
+		PR:   &PR{Author: app, Changes: []Change{{Status: 'A', Path: evil}}},
+	}
+	res := Check(in, &Options{AppLogins: []string{app}, SkipRegistry: true})
+	if res.OK() || res.AutoMergeable {
+		t.Fatalf("passed: %+v", res)
+	}
+	for _, e := range res.Errors {
+		if strings.ContainsAny(e.String(), "\r\n") {
+			t.Errorf("finding with a raw line break: %q", e.String())
+		}
+	}
+	if !strings.Contains(res.Errors[0].String(), `"peers/a\n::set-output`) {
+		t.Errorf("path not shown quoted: %s", res.Errors[0])
+	}
+}

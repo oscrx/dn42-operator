@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	yamlv4 "go.yaml.in/yaml/v4"
 
@@ -231,6 +232,16 @@ func Check(in Input, o *Options) *Result {
 	opt.defaults()
 	res := &Result{}
 
+	// Git allows newlines and other control characters in paths; printed
+	// raw they could become GitHub Actions workflow commands. Refuse them
+	// before anything else, naming them only quoted.
+	if bad := controlPaths(in); len(bad) > 0 {
+		for _, p := range bad {
+			res.errorf("", "path %q contains control characters", p)
+		}
+		return res
+	}
+
 	// Every file in the peers dir, valid on its own.
 	paths := make([]string, 0, len(in.Head))
 	for p := range in.Head {
@@ -368,6 +379,31 @@ func checkPR(in Input, opt *Options, res *Result) {
 }
 
 // keyRefOf returns spec.keyRef; ok is false if the file doesn't parse.
+// controlPaths lists the paths in the input (tree and PR changes) that
+// contain control characters, sorted.
+func controlPaths(in Input) []string {
+	seen := map[string]bool{}
+	check := func(p string) {
+		if strings.IndexFunc(p, unicode.IsControl) >= 0 {
+			seen[p] = true
+		}
+	}
+	for p := range in.Head {
+		check(p)
+	}
+	if in.PR != nil {
+		for _, c := range in.PR.Changes {
+			check(c.Path)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func keyRefOf(b []byte) (string, bool) {
 	// The same strict decode as the file check: what the cluster would read.
 	var pf peerFile

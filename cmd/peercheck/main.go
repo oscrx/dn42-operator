@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/oscrx/dn42-operator/internal/peercheck"
 	"github.com/oscrx/dn42-operator/internal/registry"
@@ -87,7 +88,7 @@ func run() int {
 	res := peercheck.Check(in, &opt)
 	gha := os.Getenv("GITHUB_ACTIONS") == "true"
 	for _, f := range res.Errors {
-		fmt.Println("ERROR", f)
+		fmt.Println("ERROR", oneLine(f.String()))
 		if gha {
 			if f.File != "" {
 				fmt.Printf("::error file=%s::%s\n", escapeProp(f.File), escapeData(f.Message))
@@ -103,7 +104,7 @@ func run() int {
 		} else {
 			fmt.Println("auto-mergeable: no")
 			for _, r := range res.NotAutoMergeable {
-				fmt.Println("  -", r)
+				fmt.Println("  -", oneLine(r))
 			}
 		}
 		if out := os.Getenv("GITHUB_OUTPUT"); out != "" {
@@ -132,6 +133,18 @@ func fail(format string, args ...any) int {
 }
 
 // Workflow command escaping: data (the message) and properties (file=).
+// oneLine keeps a finding on one output line: control characters (which
+// the check already refuses in paths) are shown escaped, never raw, so no
+// text can start a new line that GitHub Actions would read as a command.
+func oneLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '?'
+		}
+		return r
+	}, s)
+}
+
 func escapeData(s string) string {
 	return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(s)
 }
