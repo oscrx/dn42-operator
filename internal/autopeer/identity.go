@@ -21,6 +21,9 @@ type Identity struct {
 	Name     string   `json:"n,omitempty"`
 	Mntners  []string `json:"m,omitempty"`
 	ASNs     []int64  `json:"a"`
+	// Admin may manage peerings of any DN42 ASN (set at login, see
+	// Config.IsAdmin; the session cookie is encrypted, so it can't be forged).
+	Admin bool `json:"ad,omitempty"`
 }
 
 // DisplayName is the name to show: the name claim, else the subject.
@@ -31,17 +34,30 @@ func (id *Identity) DisplayName() string {
 	return id.Subject
 }
 
-// Login describes the identity for a PR body: the name, the provider, and
-// the subject when it differs from the name.
+// Login describes the identity for a PR body: the name, the provider (and
+// whether it acted as admin), and the subject when it differs from the name.
 func (id *Identity) Login() string {
-	if id.Name == "" || id.Name == id.Subject {
-		return fmt.Sprintf("%s (%s)", mdCode(id.Subject), id.Provider)
+	via := id.Provider
+	if id.Admin {
+		via += ", admin"
 	}
-	return fmt.Sprintf("%s (%s, subject %s)", mdCode(id.Name), id.Provider, mdCode(id.Subject))
+	if id.Name == "" || id.Name == id.Subject {
+		return fmt.Sprintf("%s (%s)", mdCode(id.Subject), via)
+	}
+	return fmt.Sprintf("%s (%s, subject %s)", mdCode(id.Name), via, mdCode(id.Subject))
 }
 
-// May reports whether the identity may manage asn.
+// May reports whether the identity may manage asn: one of its own, or any
+// DN42 ASN for an admin.
 func (id *Identity) May(asn int64) bool {
+	if id.Admin {
+		return peer.IsDN42ASN(asn)
+	}
+	return id.holds(asn)
+}
+
+// holds reports whether asn is one of the login's own ASNs.
+func (id *Identity) holds(asn int64) bool {
 	for _, a := range id.ASNs {
 		if a == asn {
 			return true
@@ -159,4 +175,19 @@ func IdentityFromClaims(p *ProviderConfig, claims map[string]any, reg *registry.
 			p.Name, id.Subject, p.Claims.ASN, p.Claims.Mntner)
 	}
 	return id, nil
+}
+
+// claimNames lists the claim paths in claims, nested maps as dotted paths
+// ("dn42.asn"), sorted. Values are left out.
+func claimNames(claims map[string]any, prefix string) []string {
+	var out []string
+	for k, v := range claims {
+		if m, ok := v.(map[string]any); ok {
+			out = append(out, claimNames(m, prefix+k+".")...)
+		} else {
+			out = append(out, prefix+k)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -40,6 +40,17 @@ type Config struct {
 	Registry   RegistryConfig   `json:"registry"`
 	GitHub     GitHubConfig     `json:"github"`
 	Kubernetes KubeConfig       `json:"kubernetes"`
+	Admin      AdminConfig      `json:"admin"`
+}
+
+// AdminConfig makes logins for the router's own ASN admins: they may add,
+// edit and remove peerings for any DN42 ASN, through the same PRs (which
+// auto-merge like any other). Off by default: an admin login is only as
+// trustworthy as the providers that can issue it.
+type AdminConfig struct {
+	Enabled bool `json:"enabled"`
+	// Providers that may grant admin (names from providers[]). Empty: all.
+	Providers []string `json:"providers,omitempty"`
 }
 
 // LimitsConfig caps how many PRs the app opens.
@@ -246,6 +257,11 @@ func (c *Config) complete() error {
 			return fmt.Errorf("provider %s: claims.mntner needs registry.path (mntners are mapped to ASNs through the registry)", p.Name)
 		}
 	}
+	for _, n := range c.Admin.Providers {
+		if !seen[n] {
+			return fmt.Errorf("admin.providers: no provider %q", n)
+		}
+	}
 	if c.GitHub.APIURL == "" {
 		c.GitHub.APIURL = "https://api.github.com"
 	}
@@ -259,6 +275,23 @@ func (c *Config) complete() error {
 		c.Kubernetes.Namespace = "dn42"
 	}
 	return nil
+}
+
+// IsAdmin reports whether id gets admin rights: admin enabled, the login
+// shows the router's own ASN, and its provider may grant admin.
+func (c *Config) IsAdmin(id *Identity) bool {
+	if !c.Admin.Enabled || !id.holds(c.Router.ASN) {
+		return false
+	}
+	if len(c.Admin.Providers) == 0 {
+		return true
+	}
+	for _, n := range c.Admin.Providers {
+		if n == id.Provider {
+			return true
+		}
+	}
+	return false
 }
 
 // BaseFor returns the configured base URL whose host is host (the request's

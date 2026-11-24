@@ -40,6 +40,14 @@ kubernetes:
   enabled: true                          # status page; read-only on dn42peers
   namespace: dn42-router                  # where the router chart runs (the DN42Peers)
 
+# Logins showing router.asn become admins: add, edit and remove peerings for
+# any DN42 ASN (except router.asn itself), through the same auto-merging PRs.
+# Off by default; an admin login is only as trustworthy as every provider
+# that can issue one, so list the ones you trust.
+admin:
+  enabled: false
+  providers: [iedon, kioubit]
+
 providers:
   # Kioubit (AS4242423914), verified with a real login 2026-11-24. Register
   # a client in its control panel at https://dn42.g-load.eu/auth/oauth/;

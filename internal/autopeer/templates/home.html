@@ -1,7 +1,8 @@
 {{define "home.html"}}{{template "head" .}}
-<p>Logged in through {{.Session.Identity.Provider}}. You may manage: {{range $i, $a := .Session.Identity.ASNs}}{{if $i}}, {{end}}AS{{$a}}{{end}}.</p>
+{{if .Session.Identity.Admin}}<p>Logged in through {{.Session.Identity.Provider}} as <strong>admin</strong>: you may add, edit and remove peerings for any DN42 ASN.</p>
+{{else}}<p>Logged in through {{.Session.Identity.Provider}}. You may manage: {{range $i, $a := .Session.Identity.ASNs}}{{if $i}}, {{end}}AS{{$a}}{{end}}.</p>{{end}}
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
-<h2>Your peerings</h2>
+<h2>{{if .Session.Identity.Admin}}All peerings{{else}}Your peerings{{end}}</h2>
 {{if .Peers}}<table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th><th></th></tr>
 {{$csrf := .Session.CSRF}}{{range .Peers}}<tr><td>{{.Name}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
 <td>{{if .Live}}{{or .BGPState "—"}}{{if eq .Valid "False"}} <span class="err">({{.ValidReason}})</span>{{end}}{{else}}not configured yet{{end}}</td>

@@ -345,3 +345,66 @@ func TestPKCEAndNonceEnforced(t *testing.T) {
 		t.Errorf("good flow: %v %v", claims, err)
 	}
 }
+
+func TestAdmin(t *testing.T) {
+	own := map[string]any{"asn": "4242423818"}
+	prov := func(issuer string) ProviderConfig {
+		return ProviderConfig{Name: "x", Issuer: issuer, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}}
+	}
+	seed := func(a *app) {
+		p := existingPeer("theirs", 4242420011, 20011, "fe80::2")
+		b, _ := PeerYAML(&p)
+		a.repo.Files["peers/4242420011-theirs.yaml"] = b
+	}
+
+	// Disabled (the default): our own ASN is just a login with nothing to manage.
+	idp := newFakeIdP(t, own)
+	a := newApp(t, prov(idp.srv.URL))
+	seed(a)
+	if _, body := a.get("/login/x"); strings.Contains(body, "admin") || strings.Contains(body, "theirs") {
+		t.Errorf("admin while disabled:\n%s", body)
+	}
+
+	// Only listed providers grant admin.
+	idp = newFakeIdP(t, own)
+	a = newAppCfg(t, func(c *Config) { c.Admin = AdminConfig{Enabled: true, Providers: []string{"y"}} },
+		prov(idp.srv.URL), ProviderConfig{Name: "y", Issuer: idp.srv.URL, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}})
+	seed(a)
+	if _, body := a.get("/login/x"); strings.Contains(body, "<strong>admin</strong>") {
+		t.Errorf("admin through an unlisted provider:\n%s", body)
+	}
+
+	// Enabled: every peering is listed, editable, and any DN42 ASN can be added.
+	idp = newFakeIdP(t, own)
+	a = newAppCfg(t, func(c *Config) { c.Admin.Enabled = true }, prov(idp.srv.URL))
+	seed(a)
+	_, body := a.get("/login/x")
+	if !strings.Contains(body, "<strong>admin</strong>") || !strings.Contains(body, "<td>theirs</td>") ||
+		!strings.Contains(body, `href="/peer/edit?name=theirs"`) {
+		t.Fatalf("admin home:\n%s", body)
+	}
+	if _, body := a.get("/peer/new"); !strings.Contains(body, `<input id="asn" name="asn"`) {
+		t.Errorf("admin form has no free ASN field:\n%s", body)
+	}
+	form := url.Values{"csrf": {a.csrf()}, "asn": {"4242420099"}, "name": {"newbie"}, "publicKey": {theirPub},
+		"neighbor": {"fe80::99"}}
+	if code, body := a.post("/peer", form); code != 200 {
+		t.Fatalf("admin add: %d\n%s", code, body)
+	}
+	if len(a.repo.PRs) != 1 || !strings.Contains(a.repo.PRs[0].Body, "(x, admin)") {
+		t.Errorf("PR: %+v", a.repo.PRs)
+	}
+	// Still no peering with ourselves, nor with non-DN42 ASNs.
+	for _, asn := range []string{"4242423818", "13335"} {
+		form.Set("asn", asn)
+		form.Set("name", "n"+asn[len(asn)-3:])
+		if code, _ := a.post("/peer", form); code != http.StatusUnprocessableEntity {
+			t.Errorf("admin add AS%s: %d", asn, code)
+		}
+	}
+	// And admins remove other ASNs' peerings.
+	rm := url.Values{"csrf": {a.csrf()}, "name": {"theirs"}}
+	if code, body := a.post("/peer/remove", rm); code != 200 {
+		t.Errorf("admin remove: %d\n%s", code, body)
+	}
+}

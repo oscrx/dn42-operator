@@ -261,18 +261,22 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusUnauthorized, "Login with "+p.Config.DisplayName+" failed.")
 		return
 	}
+	// Which claims the provider sent (names only, never values): enough to
+	// map claims.* for a new provider without logging personal data.
+	log.Info("claims", "provider", name, "names", claimNames(claims, ""))
 	id, err := IdentityFromClaims(p.Config, claims, s.Registry)
 	if err != nil {
 		log.Info("login without ASN", "provider", name, "error", err.Error())
 		s.fail(w, http.StatusForbidden, "Your login did not show any DN42 ASN you maintain.")
 		return
 	}
+	id.Admin = s.Cfg.IsAdmin(id)
 	sess := Session{Identity: *id, CSRF: randomString(24)}
 	if err := s.Cookies.Set(w, sessionCookie, sess, s.Cfg.SessionTTL.Duration); err != nil {
 		s.fail(w, http.StatusInternalServerError, "Could not save the session.")
 		return
 	}
-	log.Info("login", "provider", name, "subject", id.Subject, "name", id.Name, "asns", id.ASNs)
+	log.Info("login", "provider", name, "subject", id.Subject, "name", id.Name, "asns", id.ASNs, "admin", id.Admin)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -318,7 +322,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	asn, err := strconv.ParseInt(form["asn"], 10, 64)
 	if err != nil {
-		again("Pick one of your ASNs.", "asn")
+		again("Enter an ASN.", "asn")
 		return
 	}
 	existing, err := s.Repo.ListPeers(r.Context())

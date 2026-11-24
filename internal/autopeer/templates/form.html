@@ -3,8 +3,11 @@
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
 <form method="post" action="/peer">
 <input type="hidden" name="csrf" value="{{.Session.CSRF}}">
-<label for="asn">Your ASN</label>
-<select id="asn" name="asn">{{$sel := index .Form "asn"}}{{range .Session.Identity.ASNs}}<option value="{{.}}"{{if eq (printf "%d" .) $sel}} selected{{end}}>AS{{.}}</option>{{end}}</select>
+{{if .Session.Identity.Admin}}<label for="asn">Their ASN (admin)</label>
+<input id="asn" name="asn" value="{{index .Form "asn"}}" required inputmode="numeric" pattern="[0-9]{1,10}" placeholder="4242420000">
+<small>Admin: any DN42 ASN with an aut-num object. The peers repo's CI checks the registry.</small>
+{{else}}<label for="asn">Your ASN</label>
+<select id="asn" name="asn">{{$sel := index .Form "asn"}}{{$own := .RouterASN}}{{range .Session.Identity.ASNs}}{{if ne . $own}}<option value="{{.}}"{{if eq (printf "%d" .) $sel}} selected{{end}}>AS{{.}}</option>{{end}}{{end}}</select>{{end}}
 <label for="name">Name</label><input id="name" name="name" value="{{index .Form "name"}}" required maxlength="12" pattern="[a-z][a-z0-9]{0,11}">
 <small>1-12 lowercase letters/digits, e.g. your network name plus a location. Our interface will be wg-&lt;name&gt;.</small>
 <label for="publicKey">Your WireGuard public key</label><input id="publicKey" name="publicKey" value="{{index .Form "publicKey"}}" required maxlength="44">

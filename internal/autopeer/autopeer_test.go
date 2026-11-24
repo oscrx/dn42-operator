@@ -335,6 +335,11 @@ func TestConfigChecks(t *testing.T) {
 	if err := c.complete(); err != nil {
 		t.Errorf("mntner claim with registry.path: %v", err)
 	}
+	c = testConfig(t)
+	c.Admin = AdminConfig{Enabled: true, Providers: []string{"nope"}}
+	if err := c.complete(); err == nil {
+		t.Error("admin.providers with an unknown provider accepted")
+	}
 }
 
 func TestExampleConfigParses(t *testing.T) {
@@ -361,5 +366,12 @@ func TestExampleConfigParses(t *testing.T) {
 	}
 	if len(c.Providers) != 4 || c.Registry.Refresh.Duration != 10*time.Minute {
 		t.Errorf("%+v", c)
+	}
+}
+
+func TestClaimNames(t *testing.T) {
+	got := strings.Join(claimNames(map[string]any{"sub": "x", "dn42": map[string]any{"asn": 1.0, "active_mnt": "M"}}, ""), ",")
+	if got != "dn42.active_mnt,dn42.asn,sub" {
+		t.Errorf("got %s", got)
 	}
 }
