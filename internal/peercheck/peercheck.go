@@ -17,7 +17,6 @@ import (
 	"strings"
 
 	yamlv4 "go.yaml.in/yaml/v4"
-	"sigs.k8s.io/yaml"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/peer"
@@ -186,7 +185,7 @@ func ParseFile(p string, f File, o *Options) (result *Parsed, problems []string)
 		return nil, errs
 	}
 	var pf peerFile
-	if err := yaml.UnmarshalStrict(f.Content, &pf); err != nil {
+	if err := peer.DecodeFile(f.Content, &pf); err != nil {
 		add("schema: %v", err)
 		return nil, errs
 	}
@@ -350,11 +349,17 @@ func checkPR(in Input, opt *Options, res *Result) {
 				continue // deleted
 			}
 			headRef, ok := keyRefOf(h.Content)
-			baseRef := ""
-			if b, inBase := pr.Base[p]; inBase && ok {
-				baseRef, ok = keyRefOf(b.Content)
+			if !ok {
+				continue // doesn't decode: already a schema error
 			}
-			if !ok || headRef != baseRef {
+			baseRef := ""
+			if b, inBase := pr.Base[p]; inBase {
+				if baseRef, ok = keyRefOf(b.Content); !ok {
+					res.errorf(p, "the base version does not decode, so a keyRef change can't be ruled out")
+					continue
+				}
+			}
+			if headRef != baseRef {
 				res.errorf(p, "the autopeer App may not set or change keyRef")
 			}
 		}
@@ -364,13 +369,9 @@ func checkPR(in Input, opt *Options, res *Result) {
 
 // keyRefOf returns spec.keyRef; ok is false if the file doesn't parse.
 func keyRefOf(b []byte) (string, bool) {
-	var pf struct {
-		Spec struct {
-			KeyRef string `json:"keyRef"`
-		} `json:"spec"`
-	}
-	// Lenient on purpose: this only looks for the field.
-	if err := yaml.Unmarshal(b, &pf); err != nil {
+	// The same strict decode as the file check: what the cluster would read.
+	var pf peerFile
+	if err := peer.DecodeFile(b, &pf); err != nil {
 		return "", false
 	}
 	return pf.Spec.KeyRef, true

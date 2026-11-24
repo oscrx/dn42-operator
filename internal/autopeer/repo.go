@@ -23,9 +23,8 @@ import (
 	"sync"
 	"time"
 
-	"sigs.k8s.io/yaml"
-
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
+	"github.com/oscrx/dn42-operator/internal/peer"
 )
 
 // PullRequest is a change adding, changing or (Delete) removing one peer file.
@@ -61,7 +60,7 @@ type PeerRepo interface {
 // ParsePeerFile parses one peer file strictly.
 func ParsePeerFile(b []byte) (*dn42v1.DN42Peer, error) {
 	var p dn42v1.DN42Peer
-	if err := yaml.UnmarshalStrict(b, &p); err != nil {
+	if err := peer.DecodeFile(b, &p); err != nil {
 		return nil, err
 	}
 	if p.Kind != "DN42Peer" || p.APIVersion != dn42v1.GroupVersion.String() {
