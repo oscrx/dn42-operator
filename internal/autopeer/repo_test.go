@@ -109,6 +109,7 @@ func (g *fakeGitHub) handler() http.Handler {
 			var in struct {
 				Query     string `json:"query"`
 				Variables struct {
+					Expr  string `json:"expr"`
 					Input struct {
 						Branch struct {
 							Repo string `json:"repositoryNameWithOwner"`
@@ -116,6 +117,10 @@ func (g *fakeGitHub) handler() http.Handler {
 						} `json:"branch"`
 						ExpectedHeadOid string `json:"expectedHeadOid"`
 						FileChanges     struct {
+							Additions []struct {
+								Path     string `json:"path"`
+								Contents string `json:"contents"`
+							} `json:"additions"`
 							Deletions []struct {
 								Path string `json:"path"`
 							} `json:"deletions"`
@@ -124,9 +129,28 @@ func (g *fakeGitHub) handler() http.Handler {
 				} `json:"variables"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&in)
+			if strings.Contains(in.Query, "repository(") {
+				// The peers dir listing with every blob's text.
+				if in.Variables.Expr != "main:peers" {
+					_, _ = w.Write([]byte(`{"data":{"repository":{"object":null}}}`))
+					return
+				}
+				var entries []map[string]any
+				for path, c := range g.files {
+					entries = append(entries, map[string]any{"name": path[strings.LastIndex(path, "/")+1:], "type": "blob",
+						"object": map[string]any{"text": c}})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"repository": map[string]any{
+					"object": map[string]any{"entries": entries}}}})
+				return
+			}
 			v := in.Variables.Input
 			if !strings.Contains(in.Query, "createCommitOnBranch") || v.Branch.Repo != "oscrx/dn42-peers" || v.ExpectedHeadOid == "" {
 				_, _ = w.Write([]byte(`{"errors":[{"message":"bad request"}]}`))
+				return
+			}
+			if _, ok := g.refs["refs/heads/"+v.Branch.Name]; !ok {
+				_, _ = w.Write([]byte(`{"errors":[{"message":"no such branch"}]}`))
 				return
 			}
 			for _, d := range v.FileChanges.Deletions {
@@ -136,7 +160,18 @@ func (g *fakeGitHub) handler() http.Handler {
 				}
 				g.deleted[v.Branch.Name+"/"+d.Path] = true
 			}
+			for _, a := range v.FileChanges.Additions {
+				b, err := base64.StdEncoding.DecodeString(a.Contents)
+				if err != nil {
+					_, _ = w.Write([]byte(`{"errors":[{"message":"contents not base64"}]}`))
+					return
+				}
+				g.added[v.Branch.Name+"/"+a.Path] = string(b)
+			}
 			_, _ = w.Write([]byte(`{"data":{"createCommitOnBranch":{"commit":{"oid":"c0ffee"}}}}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(p, "/git/refs/heads/"):
+			delete(g.refs, "refs/heads/"+strings.TrimPrefix(p, "/git/refs/heads/"))
+			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodGet && strings.HasPrefix(p, "/contents/peers/"):
 			c, ok := g.files[strings.TrimPrefix(p, "/contents/")]
 			if !ok {
@@ -230,10 +265,14 @@ func TestGitHubApp(t *testing.T) {
 	gh := &GitHubApp{Key: parsed, HTTPClient: srv.Client(), Cfg: GitHubConfig{APIURL: srv.URL, Owner: "oscrx", Repo: "dn42-peers",
 		BaseBranch: "main", PeersDir: "peers", AppID: 1234, InstallationID: 77, AppLogin: "dn42-autopeer[bot]"}}
 
+	// A file that doesn't parse is skipped, not fatal for the whole list.
+	fg.files["peers/4242420003-broken.yaml"] = "spec: [not a peer"
 	peers, err := gh.ListPeers(t.Context())
 	if err != nil || len(peers) != 1 || peers[0].Name != "old" || *peers[0].Spec.ListenPort != 20001 {
 		t.Fatalf("list: %v %v", peers, err)
 	}
+	delete(fg.files, "peers/4242420003-broken.yaml")
+	gh.invalidate()
 	url, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/x", Path: "peers/4242420002-new.yaml",
 		Content: []byte("hello"), Title: "Add peer", Body: "body"})
 	if err != nil || url != "https://github.com/oscrx/dn42-peers/pull/9" {
@@ -259,12 +298,15 @@ func TestGitHubApp(t *testing.T) {
 	if !fg.deleted["autopeer/rm/peers/4242420001-old.yaml"] {
 		t.Errorf("deleted: %v", fg.deleted)
 	}
-	// A GraphQL error fails the PR.
+	// A GraphQL error fails the PR, and its branch is removed again.
 	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/rm2", Path: "peers/4242420099-none.yaml", Delete: true, Title: "Remove"}); err == nil ||
 		!strings.Contains(err.Error(), "no such file") {
 		t.Errorf("graphql error: %v", err)
 	}
-	// Updating an existing file sends its sha.
+	if _, left := fg.refs["refs/heads/autopeer/rm2"]; left {
+		t.Error("failed PR left its branch behind")
+	}
+	// Updating an existing file is a commit with an addition, like a new one.
 	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/edit", Path: "peers/4242420001-old.yaml", Content: []byte("v2"), Title: "Update"}); err != nil {
 		t.Fatal(err)
 	}

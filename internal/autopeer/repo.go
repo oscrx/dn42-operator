@@ -23,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 	"github.com/oscrx/dn42-operator/internal/peer"
 )
@@ -376,36 +378,56 @@ func (g *GitHubApp) ListPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
 }
 
 func (g *GitHubApp) listPeers(ctx context.Context) ([]dn42v1.DN42Peer, error) {
-	ref := url.QueryEscape(g.Cfg.BaseBranch)
-	var entries []contentEntry
-	err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(g.Cfg.PeersDir), ref), nil, &entries)
-	var he *HTTPError
-	if errors.As(err, &he) && he.Status == http.StatusNotFound {
-		return nil, nil // no peers dir yet
+	// One query for the directory and every file's text, instead of one
+	// contents call per file.
+	const q = `query($owner: String!, $name: String!, $expr: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: $expr) {
+      ... on Tree { entries { name type object { ... on Blob { text } } } }
+    }
+  }
+}`
+	var out struct {
+		Repository struct {
+			Object *struct {
+				Entries []struct {
+					Name   string `json:"name"`
+					Type   string `json:"type"`
+					Object struct {
+						Text *string `json:"text"`
+					} `json:"object"`
+				} `json:"entries"`
+			} `json:"object"`
+		} `json:"repository"`
 	}
-	if err != nil {
+	vars := map[string]any{"owner": g.Cfg.Owner, "name": g.Cfg.Repo, "expr": g.Cfg.BaseBranch + ":" + g.Cfg.PeersDir}
+	if err := g.graphql(ctx, q, vars, &out); err != nil {
 		return nil, err
 	}
-	var out []dn42v1.DN42Peer
-	for _, e := range entries {
-		if e.Type != "file" || !strings.HasSuffix(e.Name, ".yaml") {
+	if out.Repository.Object == nil {
+		return nil, nil // no peers dir yet
+	}
+	var peers []dn42v1.DN42Peer
+	for _, e := range out.Repository.Object.Entries {
+		if e.Type != "blob" || !strings.HasSuffix(e.Name, ".yaml") {
 			continue
 		}
-		var f contentEntry
-		if err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(e.Path), ref), nil, &f); err != nil {
-			return nil, err
+		var p *dn42v1.DN42Peer
+		var err error
+		if e.Object.Text == nil {
+			err = errors.New("no text (binary or too large)")
+		} else {
+			p, err = ParsePeerFile([]byte(*e.Object.Text))
 		}
-		b, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(f.Content, "\n", ""))
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Path, err)
+			// One bad file (the peers check should never let one in) must
+			// not take every page down: skip it, and say so.
+			ctrl.Log.WithName("autopeer").Error(err, "skipping a peer file that doesn't parse", "file", g.Cfg.PeersDir+"/"+e.Name)
+			continue
 		}
-		p, err := ParsePeerFile(b)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.Path, err)
-		}
-		out = append(out, *p)
+		peers = append(peers, *p)
 	}
-	return out, nil
+	return peers, nil
 }
 
 // OpenPR branches from the base head, changes the file and opens the PR.
@@ -423,45 +445,36 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 		map[string]string{"ref": "refs/heads/" + pr.Branch, "sha": ref.Object.SHA}, nil); err != nil {
 		return "", fmt.Errorf("create branch: %w", err)
 	}
-	if pr.Delete {
-		// GraphQL, not the contents API: GitHub signs App commits made with
-		// createCommitOnBranch, deletions included, but leaves contents-API
-		// deletions unsigned, and the peers repo requires signed commits.
-		const q = `mutation($input: CreateCommitOnBranchInput!) {
+	// From here on a failure leaves the branch behind: remove it again.
+	cleanup := func(err error) (string, error) {
+		if derr := g.api(ctx, http.MethodDelete, g.repoPath("/git/refs/heads/%s", escapePath(pr.Branch)), nil, nil); derr != nil {
+			err = fmt.Errorf("%w (and removing branch %s: %v)", err, pr.Branch, derr)
+		}
+		return "", err
+	}
+	// One commit path, GraphQL createCommitOnBranch: GitHub signs App
+	// commits made this way, deletions included (contents-API deletions
+	// aren't, and the peers repo requires signed commits), and it needs no
+	// blob sha lookup.
+	changes := map[string]any{"deletions": []map[string]string{{"path": pr.Path}}}
+	if !pr.Delete {
+		changes = map[string]any{"additions": []map[string]string{
+			{"path": pr.Path, "contents": base64.StdEncoding.EncodeToString(pr.Content)}}}
+	}
+	const q = `mutation($input: CreateCommitOnBranchInput!) {
   createCommitOnBranch(input: $input) { commit { oid } }
 }`
-		input := map[string]any{
-			"branch": map[string]string{
-				"repositoryNameWithOwner": g.Cfg.Owner + "/" + g.Cfg.Repo,
-				"branchName":              pr.Branch,
-			},
-			"message":         map[string]string{"headline": pr.Title},
-			"expectedHeadOid": ref.Object.SHA,
-			"fileChanges":     map[string]any{"deletions": []map[string]string{{"path": pr.Path}}},
-		}
-		if err := g.graphql(ctx, q, map[string]any{"input": input}, nil); err != nil {
-			return "", fmt.Errorf("delete file: %w", err)
-		}
-	} else {
-		put := map[string]string{
-			"message": pr.Title,
-			"content": base64.StdEncoding.EncodeToString(pr.Content),
-			"branch":  pr.Branch,
-		}
-		// Updating an existing file needs its blob sha.
-		var cur contentEntry
-		err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(pr.Path), url.QueryEscape(pr.Branch)), nil, &cur)
-		var he *HTTPError
-		switch {
-		case err == nil:
-			put["sha"] = cur.SHA
-		case errors.As(err, &he) && he.Status == http.StatusNotFound:
-		default:
-			return "", fmt.Errorf("find file: %w", err)
-		}
-		if err := g.api(ctx, http.MethodPut, g.repoPath("/contents/%s", escapePath(pr.Path)), put, nil); err != nil {
-			return "", fmt.Errorf("write file: %w", err)
-		}
+	input := map[string]any{
+		"branch": map[string]string{
+			"repositoryNameWithOwner": g.Cfg.Owner + "/" + g.Cfg.Repo,
+			"branchName":              pr.Branch,
+		},
+		"message":         map[string]string{"headline": pr.Title},
+		"expectedHeadOid": ref.Object.SHA,
+		"fileChanges":     changes,
+	}
+	if err := g.graphql(ctx, q, map[string]any{"input": input}, nil); err != nil {
+		return cleanup(fmt.Errorf("commit: %w", err))
 	}
 	var out struct {
 		HTMLURL string `json:"html_url"`
@@ -469,7 +482,7 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 	if err := g.api(ctx, http.MethodPost, g.repoPath("/pulls"), map[string]string{
 		"title": pr.Title, "head": pr.Branch, "base": g.Cfg.BaseBranch, "body": pr.Body,
 	}, &out); err != nil {
-		return "", fmt.Errorf("open PR: %w", err)
+		return cleanup(fmt.Errorf("open PR: %w", err))
 	}
 	return out.HTMLURL, nil
 }
