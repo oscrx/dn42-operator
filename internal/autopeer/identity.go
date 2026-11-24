@@ -19,9 +19,10 @@ type Identity struct {
 	Subject  string  `json:"s"`
 	Name     string  `json:"n,omitempty"`
 	ASNs     []int64 `json:"a"`
-	// Admin may manage peerings of any DN42 ASN (set at login, see
-	// Config.IsAdmin; the session cookie is encrypted, so it can't be forged).
-	Admin bool `json:"ad,omitempty"`
+	// Admin may manage peerings of any DN42 ASN. Not stored in the session:
+	// worked out from the current config (Config.IsAdmin) whenever the
+	// session is read, so config changes apply to logged-in users at once.
+	Admin bool `json:"-"`
 }
 
 // DisplayName is the name to show: the name claim, else the subject.

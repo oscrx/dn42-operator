@@ -293,11 +293,11 @@ func ParseEndpoint(s string) (*Endpoint, error) {
 		return nil, fmt.Errorf("%q: bad port", s)
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
-		if a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() {
-			return nil, fmt.Errorf("%q: not a unicast address", s)
+		if a.Zone() != "" {
+			return nil, fmt.Errorf("%q: no zone allowed", s)
 		}
-		if !a.Is6() || a.Is4In6() {
-			return nil, fmt.Errorf("%q: IPv6 only, IPv4 endpoints are not supported", s)
+		if err := CheckEndpointAddr(a); err != nil {
+			return nil, fmt.Errorf("%q: %w", s, err)
 		}
 		if a.Is6() && !strings.HasPrefix(s, "[") {
 			return nil, fmt.Errorf("%q: IPv6 needs brackets", s)
@@ -308,6 +308,21 @@ func ParseEndpoint(s string) (*Endpoint, error) {
 		return nil, fmt.Errorf("%q: host is neither an IP nor a hostname", s)
 	}
 	return &Endpoint{Host: strings.ToLower(host), Port: port}, nil
+}
+
+// CheckEndpointAddr reports whether a is usable as a peer's endpoint: a
+// global or unique-local IPv6 unicast address. Loopback, link-local,
+// unspecified and multicast addresses would point the router at itself or
+// its links, and IPv4 isn't supported (the router is IPv6 only). Used for
+// configured addresses and for what a hostname resolves to.
+func CheckEndpointAddr(a netip.Addr) error {
+	switch {
+	case !a.Is6() || a.Is4In6():
+		return fmt.Errorf("IPv6 only, IPv4 endpoints are not supported")
+	case a.IsLoopback(), a.IsLinkLocalUnicast(), a.IsUnspecified(), a.IsMulticast():
+		return fmt.Errorf("not a usable unicast address")
+	}
+	return nil
 }
 
 // Result is the outcome of validating one object within the whole set.

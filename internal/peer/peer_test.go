@@ -129,6 +129,17 @@ func TestEndpointHostname(t *testing.T) {
 			t.Errorf("%s: %v", bad, err)
 		}
 	}
+	// Not the router itself or its links.
+	for _, bad := range []string{"[::1]:53", "[fe80::1]:51820", "[::]:51820", "[ff02::1]:51820"} {
+		if _, err := ParseEndpoint(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+	for _, good := range []string{"[2001:db8::1]:51820", "[fd42:4242::1]:51820"} {
+		if _, err := ParseEndpoint(good); err != nil {
+			t.Errorf("%s: %v", good, err)
+		}
+	}
 }
 
 func obj(name string, created int, s dn42v1.DN42PeerSpec) dn42v1.DN42Peer {

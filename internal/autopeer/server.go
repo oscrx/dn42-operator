@@ -109,6 +109,7 @@ func (s *Server) session(r *http.Request) *Session {
 	if err := s.Cookies.Get(r, sessionCookie, &sess); err != nil {
 		return nil
 	}
+	sess.Identity.Admin = s.Cfg.IsAdmin(&sess.Identity)
 	return &sess
 }
 

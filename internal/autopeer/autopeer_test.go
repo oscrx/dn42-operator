@@ -1,6 +1,7 @@
 package autopeer
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -283,6 +284,18 @@ func TestConfigChecks(t *testing.T) {
 	c.Admin = AdminConfig{Enabled: true, Providers: []string{"nope"}}
 	if err := c.complete(); err == nil {
 		t.Error("admin.providers with an unknown provider accepted")
+	}
+	c = testConfig(t)
+	c.PublicURL, c.ExtraPublicURLs = "https://a.example", []string{"http://b.example"}
+	if err := c.complete(); err == nil {
+		t.Error("mixed public URL schemes accepted")
+	}
+}
+
+func TestAdminNotInSession(t *testing.T) {
+	b, _ := json.Marshal(Session{Identity: Identity{Provider: "x", Subject: "s", ASNs: []int64{4242423818}, Admin: true}})
+	if strings.Contains(string(b), "true") {
+		t.Errorf("admin flag stored in the session: %s", b)
 	}
 }
 

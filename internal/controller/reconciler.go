@@ -575,5 +575,10 @@ func DefaultResolver(ctx context.Context, ep *peer.Endpoint) (*net.UDPAddr, erro
 	if len(addrs) == 0 {
 		return nil, fmt.Errorf("%s: no IPv6 address", ep.Host)
 	}
+	// The same rule as for a configured address: a name can't point the
+	// router at itself either.
+	if err := peer.CheckEndpointAddr(addrs[0]); err != nil {
+		return nil, fmt.Errorf("%s resolves to %s: %w", ep.Host, addrs[0], err)
+	}
 	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(addrs[0], uint16(ep.Port))), nil
 }

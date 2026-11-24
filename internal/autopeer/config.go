@@ -242,6 +242,11 @@ func (c *Config) complete() error {
 		if err != nil || (pu.Scheme != "https" && pu.Scheme != "http") || pu.Host == "" || pu.Path != "" || pu.RawQuery != "" {
 			return fmt.Errorf("public URL %q must be scheme://host with no path", u)
 		}
+		// One scheme for all: the session cookie's Secure flag follows it,
+		// so a mix would break logins on one host or weaken the other's.
+		if len(bases) > 0 && !strings.HasPrefix(u, strings.SplitN(bases[0], ":", 2)[0]+"://") {
+			return fmt.Errorf("public URL %q: all public URLs must use the same scheme as %q", u, bases[0])
+		}
 		bases = append(bases, u)
 	}
 	c.PublicURL, c.ExtraPublicURLs = bases[0], bases[1:]

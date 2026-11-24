@@ -4,8 +4,10 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -408,5 +410,23 @@ func TestLookingGlassLinks(t *testing.T) {
 	c.LookingGlass = LookingGlassConfig{URL: "http://lg.example.net", Server: "x"}
 	if err := c.complete(); err == nil {
 		t.Error("non-https looking glass accepted")
+	}
+}
+
+func TestDiscoveryFailureRemembered(t *testing.T) {
+	var calls atomic.Int32
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer down.Close()
+	p := NewProvider(&ProviderConfig{Name: "x", Issuer: down.URL, ClientID: "c"})
+	for range 3 {
+		if _, err := p.AuthCodeURL(t.Context(), NewFlow("x", "https://app/cb", down.URL)); err == nil {
+			t.Fatal("discovery of a provider that is down succeeded")
+		}
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("asked the provider %d times, want 1 within the retry window", n)
 	}
 }

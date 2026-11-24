@@ -24,6 +24,7 @@ type Provider struct {
 
 	mu        sync.Mutex
 	endpoints map[string]*endpoint // by issuer ("" for plain OAuth)
+	failures  map[string]discoveryFailure
 }
 
 // endpoint is one issuer's discovered configuration.
@@ -36,25 +37,56 @@ type endpoint struct {
 // NewProvider prepares a provider. The redirect URI is per flow, so one
 // provider serves every public host.
 func NewProvider(cfg *ProviderConfig) *Provider {
-	return &Provider{Config: cfg, HTTPClient: &http.Client{Timeout: 10 * time.Second}, endpoints: map[string]*endpoint{}}
+	return &Provider{Config: cfg, HTTPClient: &http.Client{Timeout: 10 * time.Second},
+		endpoints: map[string]*endpoint{}, failures: map[string]discoveryFailure{}}
 }
 
 func (p *Provider) ctx(ctx context.Context) context.Context {
 	return oidc.ClientContext(context.WithValue(ctx, oauth2.HTTPClient, p.HTTPClient), p.HTTPClient)
 }
 
+// discoveryRetry is how long a failed discovery is remembered, so a
+// provider that is down isn't asked again on every login click.
+const discoveryRetry = 30 * time.Second
+
 // endpoint returns the (lazily discovered) endpoints for issuer. Only the
 // configured issuers are accepted, so a flow cookie can't point elsewhere.
+// Discovery runs outside the lock; a failure is remembered for
+// discoveryRetry.
 func (p *Provider) endpoint(ctx context.Context, issuer string) (*endpoint, error) {
 	c := p.Config
 	if !c.knowsIssuer(issuer) {
 		return nil, fmt.Errorf("provider %s: issuer %q is not configured", c.Name, issuer)
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if e, ok := p.endpoints[issuer]; ok {
+	e, ok := p.endpoints[issuer]
+	f, failed := p.failures[issuer]
+	p.mu.Unlock()
+	if ok {
 		return e, nil
 	}
+	if failed && time.Since(f.at) < discoveryRetry {
+		return nil, f.err
+	}
+	e, err := p.discover(ctx, issuer)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err != nil {
+		p.failures[issuer] = discoveryFailure{at: time.Now(), err: err}
+		return nil, err
+	}
+	delete(p.failures, issuer)
+	p.endpoints[issuer] = e
+	return e, nil
+}
+
+type discoveryFailure struct {
+	at  time.Time
+	err error
+}
+
+func (p *Provider) discover(ctx context.Context, issuer string) (*endpoint, error) {
+	c := p.Config
 	e := &endpoint{oauth: oauth2.Config{
 		ClientID:     c.ClientID,
 		ClientSecret: c.clientSecret,
@@ -80,7 +112,6 @@ func (p *Provider) endpoint(ctx context.Context, issuer string) (*endpoint, erro
 			e.oauth.Endpoint.TokenURL = c.TokenURL
 		}
 	}
-	p.endpoints[issuer] = e
 	return e, nil
 }
 
