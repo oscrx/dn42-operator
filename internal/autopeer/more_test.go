@@ -217,3 +217,53 @@ func TestEditPeer(t *testing.T) {
 		t.Errorf("edit while pending: %d", code)
 	}
 }
+
+func TestHostIssuers(t *testing.T) {
+	clear := newFakeIdP(t, map[string]any{"asn": "4242420010"})
+	dn42 := newFakeIdP(t, map[string]any{"asn": "4242420010"})
+	a := newAppCfg(t, func(c *Config) {
+		c.ExtraPublicURLs = []string{"https://autopeer.oscrx.dn42"}
+		c.Providers[0].HostIssuers = map[string]string{"autopeer.oscrx.dn42": dn42.srv.URL}
+	}, ProviderConfig{Name: "x", Issuer: clear.srv.URL, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}})
+	stop := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	for host, want := range map[string]string{
+		"autopeer.oscrx.dn42": dn42.srv.URL,
+		"evil.example":        clear.srv.URL, // unknown host: the primary URL and issuer
+	} {
+		req, _ := http.NewRequest(http.MethodGet, a.srv.URL+"/login/x", nil)
+		req.Host = host
+		resp, err := stop.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, want+"/") {
+			t.Errorf("host %s: sent to %s, want %s", host, loc, want)
+		}
+	}
+	// Full login on the primary host still works with the primary issuer.
+	if _, body := a.get("/login/x"); !strings.Contains(body, "AS4242420010") {
+		t.Errorf("login:\n%s", body)
+	}
+	// A flow can only use a configured issuer.
+	p := NewProvider(&ProviderConfig{Name: "x", Issuer: clear.srv.URL, ClientID: "cid"})
+	if _, err := p.AuthCodeURL(t.Context(), NewFlow("x", "https://app/cb", dn42.srv.URL)); err == nil {
+		t.Error("unconfigured issuer accepted")
+	}
+
+	c := testConfig(t)
+	c.Providers[0].HostIssuers = map[string]string{"other.example": "https://oauth.dn42"}
+	if err := c.complete(); err == nil {
+		t.Error("hostIssuers for a host we don't serve accepted")
+	}
+	c = testConfig(t)
+	c.ExtraPublicURLs = []string{"https://autopeer.oscrx.dn42"}
+	c.Providers[0].HostIssuers = map[string]string{"autopeer.oscrx.dn42": "http://oauth.dn42"}
+	if err := c.complete(); err == nil {
+		t.Error("non-https host issuer accepted")
+	}
+	c.Providers[0].HostIssuers = map[string]string{"autopeer.oscrx.dn42": "https://oauth.dn42"}
+	if err := c.complete(); err != nil {
+		t.Errorf("valid hostIssuers: %v", err)
+	}
+}

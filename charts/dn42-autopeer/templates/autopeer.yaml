@@ -22,6 +22,9 @@ metadata:
 data:
   config.yaml: |
     {{- toYaml .Values.config | nindent 4 }}
+  {{- range $name, $content := .Values.extraConfigFiles }}
+  {{ $name }}: {{ $content | quote }}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -60,7 +63,7 @@ spec:
         {{- end }}
       annotations:
         # Roll the pod when the config changes (it is read at start).
-        checksum/config: {{ toYaml .Values.config | sha256sum }}
+        checksum/config: {{ list .Values.config .Values.extraConfigFiles | toYaml | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

@@ -9,6 +9,7 @@ import (
 	"github.com/oscrx/dn42-operator/internal/peercheck"
 	"html/template"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -220,7 +221,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusNotFound, "Unknown login provider.")
 		return
 	}
-	f := NewFlow(p.Config.Name, fmt.Sprintf("%s/auth/%s/callback", s.Cfg.BaseFor(r.Host), p.Config.Name))
+	base := s.Cfg.BaseFor(r.Host)
+	bu, _ := url.Parse(base)
+	f := NewFlow(p.Config.Name, fmt.Sprintf("%s/auth/%s/callback", base, p.Config.Name), p.Config.IssuerFor(bu.Host))
 	u, err := p.AuthCodeURL(r.Context(), f)
 	if err != nil {
 		ctrl.Log.WithName("autopeer").Error(err, "login")

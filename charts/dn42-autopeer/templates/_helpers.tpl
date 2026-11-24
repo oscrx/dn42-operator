@@ -33,6 +33,11 @@ app.kubernetes.io/part-of: dn42-router
 {{- if and .Values.gitSync.enabled (not .Values.gitSync.username) -}}
 {{- fail "gitSync.username is required: git.dn42.dev has no anonymous clones" -}}
 {{- end -}}
+{{- range $name, $_ := .Values.extraConfigFiles -}}
+{{- if or (eq $name "config.yaml") (not (regexMatch "^[A-Za-z0-9._-]+$" $name)) -}}
+{{- fail (printf "extraConfigFiles: %q must be a plain file name other than config.yaml" $name) -}}
+{{- end -}}
+{{- end -}}
 {{- with .Values.config.kubernetes -}}
 {{- if and .enabled (ne (default "dn42" .namespace) $.Values.peersNamespace) -}}
 {{- fail "config.kubernetes.namespace must equal peersNamespace (the Role is only there)" -}}

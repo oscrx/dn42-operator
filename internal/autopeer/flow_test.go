@@ -323,15 +323,15 @@ func TestPKCEAndNonceEnforced(t *testing.T) {
 	idp := newFakeIdP(t, map[string]any{"asn": "4242420010"})
 	p := NewProvider(&ProviderConfig{Name: "x", Issuer: idp.srv.URL, ClientID: "cid", Claims: ClaimsConfig{ASN: "asn"}})
 
-	f := NewFlow("x", "https://app/cb")
+	f := NewFlow("x", "https://app/cb", idp.srv.URL)
 	code := codeFor(t, p, f)
 	wrong := *f
-	wrong.Verifier = NewFlow("x", "https://app/cb").Verifier
+	wrong.Verifier = NewFlow("x", "https://app/cb", idp.srv.URL).Verifier
 	if _, err := p.Claims(t.Context(), &wrong, code); err == nil {
 		t.Error("code redeemed with the wrong PKCE verifier")
 	}
 
-	f = NewFlow("x", "https://app/cb")
+	f = NewFlow("x", "https://app/cb", idp.srv.URL)
 	code = codeFor(t, p, f)
 	badNonce := *f
 	badNonce.Nonce = "other"
@@ -339,7 +339,7 @@ func TestPKCEAndNonceEnforced(t *testing.T) {
 		t.Errorf("nonce mismatch accepted: %v", err)
 	}
 
-	f = NewFlow("x", "https://app/cb")
+	f = NewFlow("x", "https://app/cb", idp.srv.URL)
 	claims, err := p.Claims(t.Context(), f, codeFor(t, p, f))
 	if err != nil || claims["sub"] != "user-1" || claims["asn"] != "4242420010" {
 		t.Errorf("good flow: %v %v", claims, err)

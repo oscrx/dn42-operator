@@ -4,6 +4,7 @@
 package autopeer
 
 import (
+	"crypto/x509"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -103,8 +104,40 @@ type ProviderConfig struct {
 	ClientSecretFile string       `json:"clientSecretFile,omitempty"` // empty: public client (PKCE only)
 	Scopes           []string     `json:"scopes"`
 	Claims           ClaimsConfig `json:"claims"`
+	// HostIssuers maps one of our public hosts to another issuer of the same
+	// provider, used for logins started on that host: e.g. the .dn42 name
+	// logs in through the provider's DN42-side address. OIDC only; the client
+	// ID, secret and claims are shared.
+	HostIssuers map[string]string `json:"hostIssuers,omitempty"`
+	// CAFile adds root certificates (PEM) for this provider's connections,
+	// e.g. the DN42 root CA for a .dn42 issuer (name-constrained to .dn42 and
+	// the DN42 address ranges, which Go enforces).
+	CAFile string `json:"caFile,omitempty"`
 
 	clientSecret string
+	caPool       *x509.CertPool
+}
+
+// IssuerFor returns the issuer for logins started on host.
+func (p *ProviderConfig) IssuerFor(host string) string {
+	for h, iss := range p.HostIssuers {
+		if strings.EqualFold(h, host) {
+			return iss
+		}
+	}
+	return p.Issuer
+}
+
+func (p *ProviderConfig) knowsIssuer(iss string) bool {
+	if iss == p.Issuer {
+		return true
+	}
+	for _, v := range p.HostIssuers {
+		if v == iss {
+			return true
+		}
+	}
+	return false
 }
 
 // RegistryConfig points at a clone of the DN42 registry. It is only needed
@@ -179,6 +212,20 @@ func LoadConfig(path string) (*Config, error) {
 				return nil, fmt.Errorf("provider %s: %w", p.Name, err)
 			}
 			p.clientSecret = strings.TrimSpace(string(s))
+		}
+		if p.CAFile != "" {
+			pem, err := os.ReadFile(p.CAFile)
+			if err != nil {
+				return nil, fmt.Errorf("provider %s: %w", p.Name, err)
+			}
+			pool, err := x509.SystemCertPool()
+			if err != nil {
+				pool = x509.NewCertPool()
+			}
+			if !pool.AppendCertsFromPEM(pem) {
+				return nil, fmt.Errorf("provider %s: no certificates in %s", p.Name, p.CAFile)
+			}
+			p.caPool = pool
 		}
 	}
 	return &c, nil
@@ -256,6 +303,17 @@ func (c *Config) complete() error {
 		if p.Claims.Mntner != "" && c.Registry.Path == "" {
 			return fmt.Errorf("provider %s: claims.mntner needs registry.path (mntners are mapped to ASNs through the registry)", p.Name)
 		}
+		for h, iss := range p.HostIssuers {
+			if p.Issuer == "" {
+				return fmt.Errorf("provider %s: hostIssuers needs an OIDC provider (issuer)", p.Name)
+			}
+			if !c.isPublicHost(h) {
+				return fmt.Errorf("provider %s: hostIssuers: %q is not the host of publicURL or extraPublicURLs", p.Name, h)
+			}
+			if u, err := url.Parse(iss); err != nil || u.Scheme != "https" || u.Host == "" {
+				return fmt.Errorf("provider %s: hostIssuers[%s]: %q is not an https URL", p.Name, h, iss)
+			}
+		}
 	}
 	for _, n := range c.Admin.Providers {
 		if !seen[n] {
@@ -288,6 +346,15 @@ func (c *Config) IsAdmin(id *Identity) bool {
 	}
 	for _, n := range c.Admin.Providers {
 		if n == id.Provider {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) isPublicHost(host string) bool {
+	for _, b := range append([]string{c.PublicURL}, c.ExtraPublicURLs...) {
+		if pu, err := url.Parse(b); err == nil && strings.EqualFold(pu.Host, host) {
 			return true
 		}
 	}
