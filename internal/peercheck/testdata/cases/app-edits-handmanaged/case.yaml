@@ -4,4 +4,4 @@ autoMergeable: false
 changes:
   - "M peers/4242422189-iedon.yaml"
 errorContains:
-  - 'hand-managed peer'
+  - 'may not set or change keyRef'

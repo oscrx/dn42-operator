@@ -47,11 +47,7 @@ type Input struct {
 
 // PR describes a pull request.
 type PR struct {
-	Author string
-	// HeadRef is the PR's branch. The App opens admin changes (a login for
-	// the router's own ASN) from AdminBranchPrefix branches; only the App
-	// creates branches for its PRs, so the prefix can't be faked.
-	HeadRef string
+	Author  string
 	Changes []Change
 	// Base holds the base versions of the peer files the PR touches.
 	Base map[string]File
@@ -344,9 +340,10 @@ func checkPR(in Input, opt *Options, res *Result) {
 		res.NotAutoMergeable = append(res.NotAutoMergeable,
 			fmt.Sprintf("auto-merge needs exactly one peer file changed, this PR changes %d", len(peerFiles)))
 	}
-	if isApp && strings.HasPrefix(pr.HeadRef, AdminBranchPrefix) {
-		// Admin: may edit or delete hand-managed peers, but never set or
-		// change a keyRef (that would point a peer at another key).
+	if isApp {
+		// The App may change or delete any peer, but never set or change a
+		// keyRef: that would point a peer at another key on our side. A
+		// peer's keyRef (its own key, set by hand) stays as it is.
 		for _, p := range peerFiles {
 			h, inHead := in.Head[p]
 			if !inHead {
@@ -354,38 +351,15 @@ func checkPR(in Input, opt *Options, res *Result) {
 			}
 			headRef, ok := keyRefOf(h.Content)
 			baseRef := ""
-			if b, inBase := pr.Base[p]; inBase {
-				if baseRef, ok = keyRefOf(b.Content); !ok {
-					res.errorf(p, "base version does not parse")
-					continue
-				}
+			if b, inBase := pr.Base[p]; inBase && ok {
+				baseRef, ok = keyRefOf(b.Content)
 			}
 			if !ok || headRef != baseRef {
-				res.errorf(p, "the autopeer App may not set or change keyRef, not even as admin")
-			}
-		}
-	} else if isApp {
-		// Hand-managed peers (with their own key) are never touched by the
-		// App, and the App never points a peer at someone else's key.
-		for _, p := range peerFiles {
-			if f, ok := in.Head[p]; ok && hasKeyRef(f.Content) {
-				res.errorf(p, "the autopeer App may not set keyRef (autopeers use the shared key)")
-			}
-			if f, ok := pr.Base[p]; ok && hasKeyRef(f.Content) {
-				res.errorf(p, "the autopeer App may not change or delete a hand-managed peer (it has keyRef)")
+				res.errorf(p, "the autopeer App may not set or change keyRef")
 			}
 		}
 	}
 	res.AutoMergeable = res.OK() && len(res.NotAutoMergeable) == 0
-}
-
-// AdminBranchPrefix marks the App's admin PRs (see PR.HeadRef). Normal
-// autopeer branches continue with an ASN, remove- or edit- after autopeer/.
-const AdminBranchPrefix = "autopeer/admin-"
-
-func hasKeyRef(b []byte) bool {
-	ref, ok := keyRefOf(b)
-	return !ok || ref != ""
 }
 
 // keyRefOf returns spec.keyRef; ok is false if the file doesn't parse.

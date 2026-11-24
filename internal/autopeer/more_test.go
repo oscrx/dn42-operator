@@ -133,7 +133,8 @@ func TestRemovePeer(t *testing.T) {
 		a.repo.Files[PeerFileName("peers", p)] = b
 	}
 	_, body := a.get("/")
-	if !strings.Contains(body, `name="name" value="mine"`) || strings.Contains(body, `name="name" value="hand"`) {
+	// Peers with their own key (keyRef) are removable like any other.
+	if !strings.Contains(body, `name="name" value="mine"`) || !strings.Contains(body, `name="name" value="hand"`) {
 		t.Errorf("remove buttons:\n%s", body)
 	}
 	csrf := a.csrf()
@@ -151,8 +152,8 @@ func TestRemovePeer(t *testing.T) {
 	if code := rm("mine"); code != http.StatusConflict {
 		t.Errorf("second removal: %d", code)
 	}
-	if code := rm("hand"); code != http.StatusForbidden {
-		t.Errorf("hand-managed: %d", code)
+	if code := rm("hand"); code != 200 {
+		t.Errorf("keyRef peer: %d", code)
 	}
 	if code := rm("other"); code != http.StatusNotFound {
 		t.Errorf("someone else's: %d", code)
@@ -163,7 +164,7 @@ func TestRemovePeer(t *testing.T) {
 	if code, _ := a.post("/peer/remove", url.Values{"name": {"mine"}}); code != http.StatusForbidden {
 		t.Errorf("no csrf: %d", code)
 	}
-	if len(a.repo.PRs) != 1 {
+	if len(a.repo.PRs) != 2 {
 		t.Errorf("PRs: %d", len(a.repo.PRs))
 	}
 }
@@ -182,8 +183,8 @@ func TestEditPeer(t *testing.T) {
 	if code, body := a.get("/peer/edit?name=mine"); code != 200 || !strings.Contains(body, `value="fe80::1"`) {
 		t.Fatalf("edit form: %d\n%s", code, body)
 	}
-	if code, _ := a.get("/peer/edit?name=hand"); code != http.StatusForbidden {
-		t.Errorf("hand-managed edit form: %d", code)
+	if code, _ := a.get("/peer/edit?name=hand"); code != 200 {
+		t.Errorf("keyRef peer edit form: %d", code)
 	}
 	csrf := a.csrf()
 	edit := func(pub, ep, nb string) (int, string) {

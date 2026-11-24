@@ -6,7 +6,6 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"github.com/oscrx/dn42-operator/internal/peercheck"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -180,7 +179,7 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 		inRepoPaths[v.File] = true
 		pd, isPending := pendingByPath[v.File]
 		v.PendingURL = pd.URL
-		v.Removable = (p.Spec.KeyRef == "" || id.Admin) && !isPending && err == nil
+		v.Removable = !isPending && err == nil
 		if p.Spec.ListenPort != nil {
 			v.ListenPort = *p.Spec.ListenPort
 		}
@@ -379,7 +378,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
-		Branch:  prBranch(sess, "", obj),
+		Branch:  prBranch("", obj),
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Add peer AS%d %s", obj.Spec.ASN, obj.Name),
@@ -412,10 +411,6 @@ func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Sessi
 	// Same answer for "doesn't exist" and "not yours".
 	if target == nil || !sess.Identity.May(target.Spec.ASN) {
 		s.fail(w, http.StatusNotFound, "No such peering of yours.")
-		return nil, "", nil, nil
-	}
-	if target.Spec.KeyRef != "" && !sess.Identity.Admin {
-		s.fail(w, http.StatusForbidden, "This peering was set up by hand; ask AS"+strconv.FormatInt(s.Cfg.Router.ASN, 10)+" to change it.")
 		return nil, "", nil, nil
 	}
 	path = PeerFileName(s.Cfg.GitHub.PeersDir, target)
@@ -462,7 +457,7 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
-		Branch: prBranch(sess, "remove-", target),
+		Branch: prBranch("remove-", target),
 		Path:   path,
 		Delete: true,
 		Title:  fmt.Sprintf("Remove peer AS%d %s", target.Spec.ASN, target.Name),
@@ -526,8 +521,8 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
-	// A hand-managed peer has its own key on our side, which we don't know
-	// here: no peer-side config to show.
+	// A peer with keyRef has its own key on our side (not the shared one),
+	// which isn't known here: no peer-side config to show.
 	var side *PeerSide
 	if obj.Spec.KeyRef == "" {
 		if side, err = RenderPeerSide(s.Cfg, p); err != nil {
@@ -540,7 +535,7 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
-		Branch:  prBranch(sess, "edit-", obj),
+		Branch:  prBranch("edit-", obj),
 		Path:    path,
 		Content: content,
 		Title:   fmt.Sprintf("Update peer AS%d %s", obj.Spec.ASN, obj.Name),
@@ -557,15 +552,9 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		"Session": sess, "PR": prURL, "Peer": obj, "Side": side, "File": string(content)})
 }
 
-// prBranch names a PR's branch: autopeer/<kind><asn>-<name>-<random>, or
-// under peercheck.AdminBranchPrefix for an admin, which the peers repo's
-// check reads to allow admin-only changes (hand-managed peers).
-func prBranch(sess *Session, kind string, p *dn42v1.DN42Peer) string {
-	prefix := "autopeer/"
-	if sess.Identity.Admin {
-		prefix = peercheck.AdminBranchPrefix
-	}
-	return fmt.Sprintf("%s%s%d-%s-%s", prefix, kind, p.Spec.ASN, p.Name, randomString(4))
+// prBranch names a PR's branch: autopeer/<kind><asn>-<name>-<random>.
+func prBranch(kind string, p *dn42v1.DN42Peer) string {
+	return fmt.Sprintf("autopeer/%s%d-%s-%s", kind, p.Spec.ASN, p.Name, randomString(4))
 }
 
 // mdCode renders untrusted text (the IdP subject) as a Markdown code span in

@@ -299,12 +299,15 @@ The flow:
 5. **Status**: the home page lists the login's peers from the repo, plus
    new ones still in an open PR. It shows live state (BGP state, handshake,
    routes, Valid) from the cluster when `kubernetes.enabled`.
-6. **Edit and removal**: an autopeer (no `keyRef`) gets Edit and Remove
-   buttons. Edit changes only the peer's own fields (public key, endpoint,
-   link-local address), keeping name, ASN, our port and link values, and
-   opens a PR updating the file. Remove opens a PR deleting it.
-   Hand-managed peers can't be changed through the app; the gate enforces
-   the same rule.
+6. **Edit and removal**: every peering of an ASN you may manage gets Edit
+   and Remove buttons. Edit changes only the peer's own fields (public key,
+   endpoint, link-local address), keeping name, ASN, our port, link values
+   and `keyRef` (a peer's own key on our side, instead of the shared one),
+   and opens a PR updating the file. Remove opens a PR deleting it.
+7. **Admin** (`admin.enabled`): a login that shows the router's own ASN,
+   through one of `admin.providers`, may manage the peerings of every DN42
+   ASN, with the same PRs. Peering with the router's own ASN is refused for
+   everyone.
 
 Peers in open PRs count as taken: a second request can't reuse their name,
 port or ASN + neighbor while the first is in review, and a peer with an
@@ -353,9 +356,10 @@ CI share one definition of a valid peer. Its checks:
 - **Across files**: no duplicate name, port or ASN + neighbor; a conflict is
   reported on the file the PR touches.
 - **PR rules**:
-  - The App (`--app-login`) may only touch `peers/`, may not set `keyRef`,
-    and may not change or delete hand-managed (`keyRef`) peers. Breaking any
-    of these fails the check.
+  - The App (`--app-login`) may only touch `peers/` and may not set or
+    change `keyRef` (deleting a peer that has one is fine). Breaking either
+    fails the check.
+  - `--local-asn`: a peer with the router's own ASN fails the check.
   - Human PRs pass but are not auto-mergeable.
   - Auto-merge needs an App PR that changes exactly one peer file.
 
