@@ -5,7 +5,7 @@ listen: ":8080"
 publicURL: https://dn42.oscarr.nl
 extraPublicURLs:                         # same app on more hosts; logins use the host they started on
   - https://autopeer.oscrx.dn42          # register both callbacks with every provider
-cookieKeyFile: /secrets/cookie-key       # 32 random bytes or their base64
+cookieKeyFile: /secrets/cookie-key       # 32 random bytes, base64
 sessionTTL: 1h
 limits:
   perLoginPerHour: 3                     # PRs (requests and removals) per login

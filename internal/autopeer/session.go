@@ -37,16 +37,19 @@ func NewCookies(key []byte, secure bool) (*Cookies, error) {
 	return &Cookies{aead: a, Secure: secure}, nil
 }
 
-// ReadKeyFile reads 32 raw bytes or their base64.
+// ReadKeyFile reads a base64-encoded key (e.g. 32 random bytes, base64).
 func ReadKeyFile(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if len(b) == 32 {
-		return b, nil
+	// One format, base64: raw bytes that happened to be 32 characters long
+	// would otherwise be read differently than their base64 decoding.
+	k, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
+	if err != nil {
+		return nil, fmt.Errorf("%s: not base64: %w", path, err)
 	}
-	return base64.StdEncoding.DecodeString(strings.TrimSpace(string(b)))
+	return k, nil
 }
 
 type sealed struct {

@@ -288,7 +288,8 @@ The flow:
    manage. Dotted paths, numbers, `AS…` strings and lists all work. The
    provider vouches for them: autopeer keeps no registry of its own (the
    peers repo's gate checks each ASN has an aut-num object). No accounts: the login lives in an AES-GCM encrypted cookie for
-   `sessionTTL`.
+   `sessionTTL`. A session can't be revoked on its own: rotating
+   `cookieKeyFile` logs everyone out.
 3. **Form**: ASN (from the login), name (suggested from the login's name
    claim, e.g. its mntner), WireGuard public key, optional IPv6 endpoint, link-local address
    (suggested as `fe80::<last 4 digits of the ASN>`), optional MTU. These

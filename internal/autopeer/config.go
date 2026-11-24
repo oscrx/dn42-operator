@@ -30,7 +30,7 @@ type Config struct {
 	ExtraPublicURLs []string `json:"extraPublicURLs,omitempty"`
 	// Limits on submissions (removals count too).
 	Limits LimitsConfig `json:"limits"`
-	// CookieKeyFile holds 32 random bytes (raw or base64) for the session
+	// CookieKeyFile holds 32 random bytes (base64) for the session
 	// cookies (AES-GCM).
 	CookieKeyFile string `json:"cookieKeyFile"`
 	// SessionTTL is how long a login lasts (default 1h).

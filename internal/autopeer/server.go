@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -83,7 +84,7 @@ func (s *Server) Handler() http.Handler {
 
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		h.ServeHTTP(w, r)
@@ -125,7 +126,7 @@ func (s *Server) home(w http.ResponseWriter, r *http.Request) {
 		for i := range s.Cfg.Providers {
 			p := &s.Cfg.Providers[i]
 			ps = append(ps, providerLink{Name: p.Name, DisplayName: p.DisplayName,
-				Initial: strings.ToUpper(p.DisplayName[:1]), Icon: template.URL(p.Icon)}) //nolint:gosec // checked in Config.complete
+				Initial: strings.ToUpper(firstRune(p.DisplayName)), Icon: template.URL(p.Icon)}) //nolint:gosec // checked in Config.complete
 		}
 		s.render(w, http.StatusOK, "login.html", map[string]any{"Providers": ps})
 		return
@@ -151,7 +152,7 @@ type PeerView struct {
 	Routes      string
 	Valid       string
 	ValidReason string
-	// Removable: an autopeer (no keyRef) without a PR already pending.
+	// Removable: no PR already pending for it (and the repo listing worked).
 	Removable bool
 	// PendingURL is an open PR for this peer.
 	PendingURL string
@@ -327,10 +328,10 @@ func parseMTU(v string) (int32, bool) {
 }
 
 // ourKey is our public key on a peer's link: what the operator reports in
-// its status, else (not live yet) the shared key.
-func (s *Server) ourKey(ctx context.Context, name string) wgtypes.Key {
-	if o := s.livePeer(ctx, name); o != nil {
-		if k, err := peer.ParseKey(o.Status.PublicKey); err == nil {
+// the live object's status, else (not live yet, live nil) the shared key.
+func (s *Server) ourKey(live *dn42v1.DN42Peer) wgtypes.Key {
+	if live != nil {
+		if k, err := peer.ParseKey(live.Status.PublicKey); err == nil {
 			return k
 		}
 	}
@@ -564,15 +565,16 @@ func (s *Server) editPeerForm(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, status int, sess *Session, target *dn42v1.DN42Peer, form map[string]string, errMsg string) {
 	data := map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": errMsg,
 		"LG": s.Cfg.LookingGlassFor(r.Host), "LGServer": s.Cfg.LookingGlass.Server}
+	live := s.livePeer(r.Context(), target.Name)
+	if live != nil {
+		data["Live"] = live
+	}
 	if p, verr := peer.FromObject(target); verr == nil {
 		data["Our"] = p
 		data["OurEndpoint"] = joinHostPort(s.Cfg.Router.EndpointHost, p.ListenPort)
-		if side, err := RenderPeerSide(s.Cfg, p, s.ourKey(r.Context(), target.Name)); err == nil {
+		if side, err := RenderPeerSide(s.Cfg, p, s.ourKey(live)); err == nil {
 			data["Side"] = side
 		}
-	}
-	if o := s.livePeer(r.Context(), target.Name); o != nil {
-		data["Live"] = o
 	}
 	s.render(w, status, "edit.html", data)
 }
@@ -624,7 +626,7 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
-	side, err := RenderPeerSide(s.Cfg, p, s.ourKey(r.Context(), obj.Name))
+	side, err := RenderPeerSide(s.Cfg, p, s.ourKey(s.livePeer(r.Context(), obj.Name)))
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
 		return
@@ -660,13 +662,24 @@ func prBranch(kind string, p *dn42v1.DN42Peer) string {
 // PR bodies, so it can't mention users or add links.
 func mdCode(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if r == '`' || r < 0x20 {
+		switch {
+		case r == '`' || unicode.IsControl(r):
 			return '\''
+		case unicode.Is(unicode.Cf, r): // bidi overrides, zero-width characters
+			return -1
 		}
 		return r
 	}, s)
-	if len(s) > 100 {
-		s = s[:100]
+	if r := []rune(s); len(r) > 100 { // cut characters, not bytes
+		s = string(r[:100])
 	}
 	return "`" + s + "`"
+}
+
+// firstRune is s's first character ("" for "").
+func firstRune(s string) string {
+	for _, r := range s {
+		return string(r)
+	}
+	return ""
 }

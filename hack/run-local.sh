@@ -16,7 +16,7 @@ trap cleanup EXIT INT TERM
 
 go build -o "$work/autopeer" ./cmd/autopeer
 go build -o "$work/fakeidp" ./hack/fakeidp
-head -c 32 /dev/urandom >"$work/cookie-key"
+head -c 32 /dev/urandom | base64 >"$work/cookie-key"
 sed "s|@WORK@|$work|g" hack/run-local.yaml >"$work/config.yaml"
 
 "$work/fakeidp" --listen 127.0.0.1:8098 --issuer http://localhost:8098 &
