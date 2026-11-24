@@ -22,9 +22,21 @@ metadata:
 data:
   config.yaml: |
     {{- toYaml .Values.config | nindent 4 }}
-  {{- range $name, $content := .Values.extraConfigFiles }}
-  {{ $name }}: {{ $content | quote }}
-  {{- end }}
+{{- with .Values.extraCACerts }}
+---
+# Extra trusted roots (e.g. the DN42 CA for a .dn42 issuer), added to the
+# system ones through SSL_CERT_DIR.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dn42-autopeer-ca
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "dn42-autopeer.labels" $ | nindent 4 }}
+data:
+  ca.crt: |
+    {{- . | nindent 4 }}
+{{- end }}
 ---
 apiVersion: v1
 kind: Service
@@ -63,7 +75,7 @@ spec:
         {{- end }}
       annotations:
         # Roll the pod when the config changes (it is read at start).
-        checksum/config: {{ list .Values.config .Values.extraConfigFiles | toYaml | sha256sum }}
+        checksum/config: {{ list .Values.config .Values.extraCACerts | toYaml | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -92,6 +104,10 @@ spec:
           image: {{ include "dn42-autopeer.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: [--config=/etc/autopeer/config.yaml]
+          {{- if .Values.extraCACerts }}
+          env:
+            - {name: SSL_CERT_DIR, value: /etc/ssl/certs:/etc/autopeer-ca}
+          {{- end }}
           ports:
             - {name: http, containerPort: 8080}
           readinessProbe:
@@ -110,6 +126,9 @@ spec:
           volumeMounts:
             - {name: config, mountPath: /etc/autopeer, readOnly: true}
             - {name: secrets, mountPath: /secrets, readOnly: true}
+            {{- if .Values.extraCACerts }}
+            - {name: ca, mountPath: /etc/autopeer-ca, readOnly: true}
+            {{- end }}
             {{- if .Values.gitSync.enabled }}
             - {name: registry, mountPath: /registry-root, readOnly: true}
             {{- end }}
@@ -140,6 +159,10 @@ spec:
           configMap: {name: dn42-autopeer-config}
         - name: secrets
           secret: {secretName: {{ .Values.existingSecret }}}
+        {{- if .Values.extraCACerts }}
+        - name: ca
+          configMap: {name: dn42-autopeer-ca}
+        {{- end }}
         {{- if .Values.gitSync.enabled }}
         - {name: registry, emptyDir: {}}
         - {name: tmp, emptyDir: {}}

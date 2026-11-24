@@ -4,7 +4,6 @@
 package autopeer
 
 import (
-	"crypto/x509"
 	"fmt"
 	"net/netip"
 	"net/url"
@@ -109,13 +108,8 @@ type ProviderConfig struct {
 	// logs in through the provider's DN42-side address. OIDC only; the client
 	// ID, secret and claims are shared.
 	HostIssuers map[string]string `json:"hostIssuers,omitempty"`
-	// CAFile adds root certificates (PEM) for this provider's connections,
-	// e.g. the DN42 root CA for a .dn42 issuer (name-constrained to .dn42 and
-	// the DN42 address ranges, which Go enforces).
-	CAFile string `json:"caFile,omitempty"`
 
 	clientSecret string
-	caPool       *x509.CertPool
 }
 
 // IssuerFor returns the issuer for logins started on host.
@@ -212,20 +206,6 @@ func LoadConfig(path string) (*Config, error) {
 				return nil, fmt.Errorf("provider %s: %w", p.Name, err)
 			}
 			p.clientSecret = strings.TrimSpace(string(s))
-		}
-		if p.CAFile != "" {
-			pem, err := os.ReadFile(p.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("provider %s: %w", p.Name, err)
-			}
-			pool, err := x509.SystemCertPool()
-			if err != nil {
-				pool = x509.NewCertPool()
-			}
-			if !pool.AppendCertsFromPEM(pem) {
-				return nil, fmt.Errorf("provider %s: no certificates in %s", p.Name, p.CAFile)
-			}
-			p.caPool = pool
 		}
 	}
 	return &c, nil

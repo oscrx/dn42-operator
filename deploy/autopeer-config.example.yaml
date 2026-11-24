@@ -73,11 +73,9 @@ providers:
     scopes: [openid, dn42]
     # Logins started on the .dn42 name stay inside DN42: the same service at
     # oauth.dn42 (own issuer, same client). Its certificate is from the DN42
-    # CA: https://ca.dn42.us/crt/root-ca.crt, sha256 7C:16:2C:DA:...:D3:E7,
-    # shipped with the chart's extraConfigFiles.
+    # CA, so the pod must trust that root (the chart's extraCACerts).
     hostIssuers:
       autopeer.oscrx.dn42: https://oauth.dn42
-    caFile: /etc/autopeer/dn42-root-ca.crt
     claims:
       subject: sub
       name: dn42.active_mnt

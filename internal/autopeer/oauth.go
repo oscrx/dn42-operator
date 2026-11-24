@@ -2,7 +2,6 @@ package autopeer
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +19,7 @@ import (
 // with its own discovery and endpoints.
 type Provider struct {
 	Config *ProviderConfig
-	// HTTPClient for discovery, token and userinfo calls (default: 10s
-	// timeout, plus the provider's caFile if set).
+	// HTTPClient for discovery, token and userinfo calls (default: 10s timeout).
 	HTTPClient *http.Client
 
 	mu        sync.Mutex
@@ -38,13 +36,7 @@ type endpoint struct {
 // NewProvider prepares a provider. The redirect URI is per flow, so one
 // provider serves every public host.
 func NewProvider(cfg *ProviderConfig) *Provider {
-	c := &http.Client{Timeout: 10 * time.Second}
-	if cfg.caPool != nil {
-		t := http.DefaultTransport.(*http.Transport).Clone()
-		t.TLSClientConfig = &tls.Config{RootCAs: cfg.caPool, MinVersion: tls.VersionTLS12}
-		c.Transport = t
-	}
-	return &Provider{Config: cfg, HTTPClient: c, endpoints: map[string]*endpoint{}}
+	return &Provider{Config: cfg, HTTPClient: &http.Client{Timeout: 10 * time.Second}, endpoints: map[string]*endpoint{}}
 }
 
 func (p *Provider) ctx(ctx context.Context) context.Context {
