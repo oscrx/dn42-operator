@@ -139,9 +139,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	sh(t, "ip", "netns", "add", "remote")
 	sh(t, "ip", "link", "add", "veth-op", "type", "veth", "peer", "name", "veth-remote")
 	sh(t, "ip", "link", "set", "veth-remote", "netns", "remote")
-	sh(t, "ip", "addr", "add", "192.0.2.1/24", "dev", "veth-op")
 	sh(t, "ip", "link", "set", "veth-op", "up")
-	sh(t, "ip", "-n", "remote", "addr", "add", "192.0.2.2/24", "dev", "veth-remote")
 	sh(t, "ip", "-n", "remote", "link", "set", "veth-remote", "up")
 	sh(t, "ip", "-n", "remote", "link", "set", "lo", "up")
 	sh(t, "ip", "addr", "add", "2001:db8:42::1/64", "dev", "veth-op", "nodad")
@@ -175,7 +173,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	secret := keySecret(t)
 	secret.Data["autopeer"] = []byte(ourKey.String())
 	aa := mkPeer("aa", 4242420002, 0, "fe80::1", 0)
-	aa.Spec.Endpoint = "192.0.2.2:51820"
+	aa.Spec.Endpoint = "[2001:db8:42::2]:51820"
 	aa.Spec.PublicKey = remoteKey.PublicKey().String()
 	aa.Spec.LocalLinkLocal = "fe80::2"
 	mtu := int32(1380)
@@ -221,9 +219,9 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	// would not come up on the link-local otherwise).
 	t.Logf("aa: state %s, %d routes", p.Status.BGPState, *p.Status.RoutesImported)
 
-	// Latency: real ICMP to the peer's endpoint, v4 and v6, over the
-	// underlay (not the VRF).
-	for _, a := range []string{"192.0.2.2", "2001:db8:42::2"} {
+	// Latency: real ICMP to the peer's endpoint over the underlay (not the
+	// VRF).
+	for _, a := range []string{"2001:db8:42::2"} {
 		rtt, lat, err := latency.Measure(ctx, latency.ICMP{Timeout: time.Second}, netip.MustParseAddr(a), 10, 20*time.Millisecond)
 		if err != nil || lat != 1 || rtt <= 0 {
 			t.Errorf("ping %s: rtt %v community %d err %v", a, rtt, lat, err)

@@ -291,6 +291,11 @@ spec:
                   from.
                 format: int64
                 type: integer
+              publicKey:
+                description: |-
+                  PublicKey is our WireGuard public key on this link (the shared key's,
+                  or keyRef's), for showing the peer its config.
+                type: string
               routesImported:
                 description: RoutesImported is the number of routes imported from
                   this peer.

@@ -1,7 +1,7 @@
 {{define "login.html"}}{{template "head" .}}
 <section class="card">
 <h2>Peer with AS{{.RouterASN}}</h2>
-<p>Set up a WireGuard + BGP peering in a few minutes. Log in with a DN42 identity provider: it proves which ASNs you maintain, and your request becomes a pull request that is merged automatically once its checks pass.</p>
+<p>Set up a WireGuard + BGP peering in a few minutes. <strong>IPv6 only</strong>: your endpoint must be reachable over IPv6, and BGP runs over link-local IPv6. Log in with a DN42 identity provider: it proves which ASNs you maintain, and your request becomes a pull request that is merged automatically once its checks pass.</p>
 <div class="providers">{{range .Providers}}<a class="login" href="/login/{{.Name}}">{{if .Icon}}<img src="{{.Icon}}" alt="">{{else}}<span class="initial">{{.Initial}}</span>{{end}}Log in with {{.DisplayName}}</a>{{end}}</div>
 </section>
 {{template "foot" .}}{{end}}

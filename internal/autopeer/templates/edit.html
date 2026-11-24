@@ -1,14 +1,30 @@
 {{define "edit.html"}}{{template "head" .}}
 <section class="card">
-<h2>Edit {{.Peer.Name}} (AS{{.Peer.Spec.ASN}})</h2>
+<h2>{{.Peer.Name}} <span class="muted">AS{{.Peer.Spec.ASN}}</span></h2>
+{{with .Live}}<p>{{if eq .Status.BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .Status.BGPState "not up yet"}}</span>{{end}}{{with .Status.RoutesImported}} {{.}} routes{{end}}</p>{{end}}
+{{with .Our}}<table class="kv">
+<tr><th>Our endpoint</th><td><code>{{$.OurEndpoint}}</code> (IPv6 only)</td></tr>
+<tr><th>Our link-local</th><td><code>{{$.OurLinkLocal}}</code></td></tr>
+<tr><th>Your link-local</th><td><code>{{.Neighbor}}</code></td></tr>
+<tr><th>Your endpoint</th><td>{{with .Endpoint}}<code>{{.}}</code>{{else}}none: you connect to us{{end}}</td></tr>
+<tr><th>MTU</th><td>{{.MTU}}</td></tr>
+</table>{{end}}
+{{with .Side}}<h2>Your WireGuard config</h2><pre>{{.WireGuard}}</pre>
+<h2>Your BIRD config</h2><pre>{{.BIRD}}</pre>{{end}}
+</section>
+<section class="card">
+<h2>Change</h2>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}
 <p>Name, ASN and our port stay the same. The change goes through a pull request like a new peering.</p>
 <form method="post" action="/peer/edit">
 <input type="hidden" name="csrf" value="{{.Session.CSRF}}">
 <input type="hidden" name="name" value="{{.Peer.Name}}">
 <label for="publicKey">Your WireGuard public key</label><input id="publicKey" name="publicKey" value="{{index .Form "publicKey"}}" required maxlength="44">
-<label for="endpoint">Your endpoint (optional)</label><input id="endpoint" name="endpoint" value="{{index .Form "endpoint"}}">
+<label for="endpoint">Your endpoint (optional)</label><input id="endpoint" name="endpoint" value="{{index .Form "endpoint"}}" placeholder="[2001:db8::1]:23818 or host.example.net:23818">
+<small>IPv6 only: an IPv6 address, or a hostname with an AAAA record.</small>
 <label for="neighbor">Your link-local address</label><input id="neighbor" name="neighbor" value="{{index .Form "neighbor"}}" required>
+<label for="mtu">MTU (optional)</label><input id="mtu" name="mtu" value="{{index .Form "mtu"}}" inputmode="numeric" placeholder="1420">
+<small>Lower it if your path has extra encapsulation, e.g. 1380 behind a tunnel. 1280-1500.</small>
 <button>Submit change</button>
 </form>
 </section>

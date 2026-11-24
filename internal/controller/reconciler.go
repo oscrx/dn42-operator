@@ -72,6 +72,7 @@ type peerResult struct {
 	asn        int64
 	iface      string
 	listenPort int32
+	publicKey  string // ours on this link
 	link       *dn42v1.LinkValues
 
 	valid       bool
@@ -381,6 +382,8 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 			continue
 		}
 
+		pr.publicKey = priv.PublicKey().String()
+
 		spec := &netdev.Spec{
 			Name:          p.Interface(),
 			VRF:           r.VRF,
@@ -558,26 +561,19 @@ func (r *Reconciler) applyServicePorts(ctx context.Context, ports map[string]int
 	return r.Client.Apply(ctx, ac, client.FieldOwner(FieldOwner), client.ForceOwnership)
 }
 
-// DefaultResolver resolves hostnames, preferring IPv6.
+// DefaultResolver resolves hostnames to IPv6 (AAAA) only: the router is IPv6 only.
 func DefaultResolver(ctx context.Context, ep *peer.Endpoint) (*net.UDPAddr, error) {
 	if a, err := netip.ParseAddr(ep.Host); err == nil {
 		return net.UDPAddrFromAddrPort(netip.AddrPortFrom(a, uint16(ep.Port))), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", ep.Host)
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip6", ep.Host)
 	if err != nil {
 		return nil, err
 	}
 	if len(addrs) == 0 {
-		return nil, fmt.Errorf("%s: no addresses", ep.Host)
+		return nil, fmt.Errorf("%s: no IPv6 address", ep.Host)
 	}
-	best := addrs[0]
-	for _, a := range addrs {
-		if a.Is6() && !a.Is4In6() {
-			best = a
-			break
-		}
-	}
-	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(best.Unmap(), uint16(ep.Port))), nil
+	return net.UDPAddrFromAddrPort(netip.AddrPortFrom(addrs[0], uint16(ep.Port))), nil
 }

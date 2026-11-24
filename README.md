@@ -19,7 +19,7 @@ metadata:
 spec:
   asn: 4242422189
   listenPort: 22189            # optional for 424242xxxx: 2 + last 4 digits
-  endpoint: "[2001:bc8:1640:5bdb:dc00:ff:fe60:c2e3]:60887"   # optional; host:port also works
+  endpoint: "[2001:bc8:1640:5bdb:dc00:ff:fe60:c2e3]:60887"   # optional; IPv6 only (host:port resolves AAAA)
   publicKey: 08dzv758I5APqJizgw/W6O+FceyHSCbx/L/GZ3TL5TQ=
   localLinkLocal: fe80::3818   # optional, default fe80::3818
   neighbor: fe80::2189:177
@@ -287,8 +287,10 @@ The flow:
    `mnt-by:` in a DN42 registry clone (`data/aut-num`), reloaded on an
    interval. No accounts: the login lives in an AES-GCM encrypted cookie for
    `sessionTTL`.
-3. **Form**: ASN (from the login), name, WireGuard public key, optional
-   endpoint, link-local address. These are checked with the same code as the
+3. **Form**: ASN (from the login), name (suggested from the login's mntner),
+   WireGuard public key, optional IPv6 endpoint, link-local address
+   (suggested as `fe80::<last 4 digits of the ASN>`), optional MTU. These
+   are checked with the same code as the
    operator, against the peers already in the repo: name, port, ASN +
    neighbor, and not our own link-local address. `listenPort` is always
    written explicitly: 2 + the last 4 digits if that's free, otherwise the
@@ -298,7 +300,9 @@ The flow:
    page shows the WireGuard and BIRD config for the peer's side.
 5. **Status**: the home page lists the login's peers from the repo, plus
    new ones still in an open PR. It shows live state (BGP state, handshake,
-   routes, Valid) from the cluster when `kubernetes.enabled`.
+   routes, Valid) from the cluster when `kubernetes.enabled`. Each peering
+   has a page with its details and the peer's config, our key taken from
+   `status.publicKey` (the shared key until it is live).
 6. **Edit and removal**: every peering of an ASN you may manage gets Edit
    and Remove buttons. Edit changes only the peer's own fields (public key,
    endpoint, link-local address), keeping name, ASN, our port, link values

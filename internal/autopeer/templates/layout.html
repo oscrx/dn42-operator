@@ -30,6 +30,9 @@ tr:last-child td{border-bottom:0}td.actions{text-align:right}td.actions a{margin
 .login:hover{background:var(--btn-hover)}.login img,.login .initial{width:32px;height:32px;flex:none;border-radius:6px}
 .login .initial{display:grid;place-items:center;background:#fff;color:var(--btn);font-weight:700}
 form.inline{display:inline}
+.card h2:not(:first-child){margin-top:1.5rem}
+table.kv th{width:9rem;vertical-align:top}table.kv td{white-space:normal;overflow-wrap:anywhere}
+code{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace}
 .primary{display:inline-block;margin-top:1rem;padding:.55rem 1.2rem;border-radius:8px;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600}
 </style></head><body><main>
 <header><h1>AS{{.RouterASN}} <span>autopeer</span></h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.DisplayName}}</button></form>{{end}}</header>

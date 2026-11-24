@@ -267,7 +267,8 @@ func ParseLinkLocal(s string) (netip.Addr, error) {
 	return a, nil
 }
 
-// ParseEndpoint parses host:port, [v6]:port or v4:port.
+// ParseEndpoint parses [v6]:port or host:port. The router is IPv6 only, so
+// IPv4 addresses are refused (and hostnames resolve to AAAA only).
 func ParseEndpoint(s string) (*Endpoint, error) {
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
@@ -280,6 +281,9 @@ func ParseEndpoint(s string) (*Endpoint, error) {
 	if a, err := netip.ParseAddr(host); err == nil {
 		if a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() {
 			return nil, fmt.Errorf("%q: not a unicast address", s)
+		}
+		if !a.Is6() || a.Is4In6() {
+			return nil, fmt.Errorf("%q: IPv6 only, IPv4 endpoints are not supported", s)
 		}
 		if a.Is6() && !strings.HasPrefix(s, "[") {
 			return nil, fmt.Errorf("%q: IPv6 needs brackets", s)

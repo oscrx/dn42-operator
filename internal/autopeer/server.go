@@ -17,7 +17,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
+	"github.com/oscrx/dn42-operator/internal/peer"
 	"github.com/oscrx/dn42-operator/internal/registry"
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 //go:embed templates/*.html
@@ -91,6 +93,7 @@ func securityHeaders(h http.Handler) http.Handler {
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, data map[string]any) {
 	data["RouterASN"] = s.Cfg.Router.ASN
+	data["OurLinkLocal"] = s.Cfg.routerLinkLocal().String()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := pages.ExecuteTemplate(w, name, data); err != nil {
@@ -305,7 +308,49 @@ func (s *Server) newPeer(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
-	s.render(w, http.StatusOK, "form.html", map[string]any{"Session": sess, "Form": map[string]string{}})
+	name, neighbor := Suggest(s.Cfg, &sess.Identity)
+	s.render(w, http.StatusOK, "form.html", map[string]any{"Session": sess, "Form": map[string]string{"name": name, "neighbor": neighbor}})
+}
+
+// parseMTU reads the optional MTU field: 0 for empty (the default).
+func parseMTU(v string) (int32, bool) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < peer.MinMTU || n > peer.MaxMTU {
+		return 0, false
+	}
+	return int32(n), true
+}
+
+// ourKey is our public key on a peer's link: what the operator reports in
+// its status, else (not live yet) the shared key.
+func (s *Server) ourKey(ctx context.Context, name string) wgtypes.Key {
+	if o := s.livePeer(ctx, name); o != nil {
+		if k, err := peer.ParseKey(o.Status.PublicKey); err == nil {
+			return k
+		}
+	}
+	return s.Cfg.routerKey()
+}
+
+// livePeer is the cluster's DN42Peer by name, nil if unknown.
+func (s *Server) livePeer(ctx context.Context, name string) *dn42v1.DN42Peer {
+	if s.Status == nil {
+		return nil
+	}
+	objs, err := s.Status.Peers(ctx)
+	if err != nil {
+		return nil
+	}
+	for i := range objs {
+		if objs[i].Name == name {
+			return &objs[i]
+		}
+	}
+	return nil
 }
 
 func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
@@ -321,7 +366,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	form := map[string]string{}
-	for _, k := range []string{"asn", "name", "publicKey", "endpoint", "neighbor"} {
+	for _, k := range []string{"asn", "name", "publicKey", "endpoint", "neighbor", "mtu"} {
 		form[k] = r.PostFormValue(k)
 	}
 	again := func(msg, field string) {
@@ -331,6 +376,11 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	asn, err := strconv.ParseInt(form["asn"], 10, 64)
 	if err != nil {
 		again("Enter an ASN.", "asn")
+		return
+	}
+	mtu, ok := parseMTU(form["mtu"])
+	if !ok {
+		again(fmt.Sprintf("MTU must be a number from %d to %d, or empty for %d.", peer.MinMTU, peer.MaxMTU, peer.DefaultMTU), "mtu")
 		return
 	}
 	existing, err := s.Repo.ListPeers(r.Context())
@@ -357,7 +407,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 			known[pd.Peer.Name] = true
 		}
 	}
-	req := Request{ASN: asn, Name: form["name"], PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"]}
+	req := Request{ASN: asn, Name: form["name"], PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"], MTU: mtu}
 	obj, p, err := BuildPeer(s.Cfg, &sess.Identity, req, existing)
 	var fe *FieldError
 	if errors.As(err, &fe) {
@@ -372,7 +422,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
-	side, err := RenderPeerSide(s.Cfg, p)
+	side, err := RenderPeerSide(s.Cfg, p, s.Cfg.routerKey()) // new: the shared key
 	if err != nil {
 		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
 		return
@@ -488,8 +538,33 @@ func (s *Server) editPeerForm(w http.ResponseWriter, r *http.Request) {
 	if target == nil {
 		return
 	}
-	s.render(w, http.StatusOK, "edit.html", map[string]any{"Session": sess, "Peer": target, "Form": map[string]string{
-		"publicKey": target.Spec.PublicKey, "endpoint": target.Spec.Endpoint, "neighbor": target.Spec.Neighbor}})
+	s.renderEdit(w, r, http.StatusOK, sess, target, map[string]string{
+		"publicKey": target.Spec.PublicKey, "endpoint": target.Spec.Endpoint, "neighbor": target.Spec.Neighbor,
+		"mtu": mtuString(target)}, "")
+}
+
+// renderEdit shows a peering: its details and the peer's config as it is
+// now, then the edit form.
+func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, status int, sess *Session, target *dn42v1.DN42Peer, form map[string]string, errMsg string) {
+	data := map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": errMsg}
+	if p, verr := peer.FromObject(target); verr == nil {
+		data["Our"] = p
+		data["OurEndpoint"] = joinHostPort(s.Cfg.Router.EndpointHost, p.ListenPort)
+		if side, err := RenderPeerSide(s.Cfg, p, s.ourKey(r.Context(), target.Name)); err == nil {
+			data["Side"] = side
+		}
+	}
+	if o := s.livePeer(r.Context(), target.Name); o != nil {
+		data["Live"] = o
+	}
+	s.render(w, status, "edit.html", data)
+}
+
+func mtuString(o *dn42v1.DN42Peer) string {
+	if m := mtuOf(o); m != 0 {
+		return strconv.Itoa(int(m))
+	}
+	return ""
 }
 
 func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
@@ -503,8 +578,14 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	form := map[string]string{}
-	for _, k := range []string{"publicKey", "endpoint", "neighbor"} {
+	for _, k := range []string{"publicKey", "endpoint", "neighbor", "mtu"} {
 		form[k] = r.PostFormValue(k)
+	}
+	mtu, ok := parseMTU(form["mtu"])
+	if !ok {
+		s.renderEdit(w, r, http.StatusUnprocessableEntity, sess, target, form,
+			fmt.Sprintf("MTU must be a number from %d to %d, or empty for %d.", peer.MinMTU, peer.MaxMTU, peer.DefaultMTU))
+		return
 	}
 	others := append([]dn42v1.DN42Peer(nil), peers...)
 	for _, pd := range pending {
@@ -512,10 +593,10 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 			others = append(others, *pd.Peer)
 		}
 	}
-	obj, p, err := UpdatePeer(s.Cfg, &sess.Identity, target, Request{PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"]}, others)
+	obj, p, err := UpdatePeer(s.Cfg, &sess.Identity, target, Request{PublicKey: form["publicKey"], Endpoint: form["endpoint"], Neighbor: form["neighbor"], MTU: mtu}, others)
 	var fe *FieldError
 	if errors.As(err, &fe) {
-		s.render(w, http.StatusUnprocessableEntity, "edit.html", map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": fe.Message})
+		s.renderEdit(w, r, http.StatusUnprocessableEntity, sess, target, form, fe.Message)
 		return
 	} else if err != nil {
 		s.fail(w, http.StatusInternalServerError, "Could not update the peer.")
@@ -526,14 +607,10 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
-	// A peer with keyRef has its own key on our side (not the shared one),
-	// which isn't known here: no peer-side config to show.
-	var side *PeerSide
-	if obj.Spec.KeyRef == "" {
-		if side, err = RenderPeerSide(s.Cfg, p); err != nil {
-			s.fail(w, http.StatusInternalServerError, "Could not render your config.")
-			return
-		}
+	side, err := RenderPeerSide(s.Cfg, p, s.ourKey(r.Context(), obj.Name))
+	if err != nil {
+		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
+		return
 	}
 	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
 		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")

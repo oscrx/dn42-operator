@@ -116,6 +116,11 @@ type DN42PeerStatus struct {
 	// +optional
 	ListenPort int32 `json:"listenPort,omitempty"`
 
+	// PublicKey is our WireGuard public key on this link (the shared key's,
+	// or keyRef's), for showing the peer its config.
+	// +optional
+	PublicKey string `json:"publicKey,omitempty"`
+
 	// Link is the effective link values rendered into BIRD.
 	// +optional
 	Link *LinkValues `json:"link,omitempty"`

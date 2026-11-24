@@ -8,10 +8,10 @@
 <section class="card">
 <h2>{{if .Session.Identity.Admin}}All peerings{{else}}Your peerings{{end}}</h2>
 {{if .Peers}}<div class="table"><table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th><th></th></tr>
-{{$csrf := .Session.CSRF}}{{range .Peers}}<tr><td>{{.Name}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
+{{$csrf := .Session.CSRF}}{{range .Peers}}<tr><td>{{if .Removable}}<a href="/peer/edit?name={{.Name}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
 <td>{{if .Live}}{{if eq .Valid "False"}}<span class="pill bad" title="{{.ValidReason}}">invalid</span>{{else if eq .BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .BGPState "—"}}</span>{{end}}{{else}}<span class="pill">not configured yet</span>{{end}}</td>
 <td>{{or .Handshake "—"}}</td><td>{{or .Routes "—"}}</td>
-<td class="actions">{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<a href="/peer/edit?name={{.Name}}">Edit</a><form method="post" action="/peer/remove" class="inline"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link">Remove</button></form>{{end}}</td></tr>{{end}}</table></div>
+<td class="actions">{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<a href="/peer/edit?name={{.Name}}">Details</a><form method="post" action="/peer/remove" class="inline"><input type="hidden" name="csrf" value="{{$csrf}}"><input type="hidden" name="name" value="{{.Name}}"><button class="link">Remove</button></form>{{end}}</td></tr>{{end}}</table></div>
 {{else}}<p class="muted">None yet.</p>{{end}}
 </section>
 {{template "foot" .}}{{end}}

@@ -3,10 +3,12 @@ package autopeer
 import (
 	"bytes"
 	"fmt"
+	"net/netip"
 	"strings"
 	"text/template"
 	"time"
 
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 
@@ -21,6 +23,38 @@ type Request struct {
 	PublicKey string
 	Endpoint  string // optional host:port
 	Neighbor  string // their link-local
+	MTU       int32  // 0: the default
+}
+
+// Suggest pre-fills the new-peering form: the name from the login's mntner
+// (OSCRX-MNT -> oscrx) and the link-local fe80::<last 4 digits of the ASN>.
+// Either is empty when there's nothing sensible to suggest.
+func Suggest(cfg *Config, id *Identity) (name, neighbor string) {
+	if id.Admin {
+		return "", "" // acting for someone else
+	}
+	n := strings.ToLower(strings.TrimSuffix(strings.ToUpper(id.DisplayName()), "-MNT"))
+	n = strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return -1
+	}, n)
+	if len(n) > 12 {
+		n = n[:12]
+	}
+	if peer.ValidateName(n) == nil {
+		name = n
+	}
+	for _, asn := range id.ASNs {
+		if asn != cfg.Router.ASN {
+			if a, err := netip.ParseAddr(fmt.Sprintf("fe80::%04d", asn%10000)); err == nil {
+				neighbor = a.String()
+			}
+			break
+		}
+	}
+	return name, neighbor
 }
 
 // FieldError is a validation error for one form field.
@@ -85,6 +119,7 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 			Endpoint:   strings.TrimSpace(req.Endpoint),
 			PublicKey:  strings.TrimSpace(req.PublicKey),
 			Neighbor:   strings.TrimSpace(req.Neighbor),
+			MTU:        mtuPtr(req.MTU),
 		},
 	}
 	pp, verr := peer.FromObject(obj)
@@ -107,7 +142,7 @@ func BuildPeer(cfg *Config, id *Identity, req Request, existing []dn42v1.DN42Pee
 }
 
 func fieldFor(msg string) string {
-	for _, f := range []string{"endpoint", "publicKey", "neighbor", "listen port", "asn"} {
+	for _, f := range []string{"endpoint", "publicKey", "neighbor", "listen port", "asn", "mtu"} {
 		if strings.Contains(msg, f) {
 			return strings.Fields(f)[0]
 		}
@@ -147,6 +182,7 @@ var wgTmpl = template.Must(template.New("wg").Parse(`# /etc/wireguard/{{.Iface}}
 [Interface]
 PrivateKey = <your private key for public key {{.TheirKey}}>
 ListenPort = {{.TheirPort}}
+MTU = {{.MTU}}
 Table = off
 PostUp = ip addr add {{.Neighbor}}/64 dev %i
 PostUp = sysctl -w net.ipv6.conf.%i.autoconf=0
@@ -165,9 +201,10 @@ protocol bgp {{.Proto}} from dnpeers {
 }
 `))
 
-// RenderPeerSide renders the peer's WireGuard and BIRD config. Every value
-// comes from validated typed fields.
-func RenderPeerSide(cfg *Config, p *peer.Peer) (*PeerSide, error) {
+// RenderPeerSide renders the peer's WireGuard and BIRD config. ourKey is our
+// public key on this link (from the peer's status; the shared key until it
+// is live). Every value comes from validated typed fields.
+func RenderPeerSide(cfg *Config, p *peer.Peer, ourKey wgtypes.Key) (*PeerSide, error) {
 	iface := "dn42-" + cfg.Router.Name // <= 15 chars: router name is <= 12
 	if len(iface) > 15 {
 		iface = iface[:15]
@@ -185,7 +222,8 @@ func RenderPeerSide(cfg *Config, p *peer.Peer) (*PeerSide, error) {
 		"TheirKey":     p.PublicKey.String(),
 		"TheirPort":    theirPort,
 		"Neighbor":     p.Neighbor.String(),
-		"OurKey":       cfg.routerKey().String(),
+		"OurKey":       ourKey.String(),
+		"MTU":          p.MTU,
 		"OurEndpoint":  joinHostPort(cfg.Router.EndpointHost, p.ListenPort),
 		"OurLinkLocal": cfg.routerLinkLocal().String(),
 		"OurASN":       cfg.Router.ASN,
@@ -220,6 +258,7 @@ func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, ot
 	obj.Spec.PublicKey = strings.TrimSpace(req.PublicKey)
 	obj.Spec.Endpoint = strings.TrimSpace(req.Endpoint)
 	obj.Spec.Neighbor = strings.TrimSpace(req.Neighbor)
+	obj.Spec.MTU = mtuPtr(req.MTU)
 	if specEqual(obj, cur) {
 		return nil, nil, &FieldError{"form", "nothing changed"}
 	}
@@ -247,5 +286,21 @@ func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, ot
 }
 
 func specEqual(a, b *dn42v1.DN42Peer) bool {
-	return a.Spec.PublicKey == b.Spec.PublicKey && a.Spec.Endpoint == b.Spec.Endpoint && a.Spec.Neighbor == b.Spec.Neighbor
+	return a.Spec.PublicKey == b.Spec.PublicKey && a.Spec.Endpoint == b.Spec.Endpoint &&
+		a.Spec.Neighbor == b.Spec.Neighbor && mtuOf(a) == mtuOf(b)
+}
+
+// mtuPtr is spec.mtu for a form value: unset for 0 (the default).
+func mtuPtr(m int32) *int32 {
+	if m == 0 {
+		return nil
+	}
+	return &m
+}
+
+func mtuOf(o *dn42v1.DN42Peer) int32 {
+	if o.Spec.MTU == nil {
+		return 0
+	}
+	return *o.Spec.MTU
 }

@@ -259,7 +259,7 @@ func TestRenderPeerSide(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	side, err := RenderPeerSide(cfg, p)
+	side, err := RenderPeerSide(cfg, p, cfg.routerKey())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestRenderPeerSide(t *testing.T) {
 	}
 	// Without their endpoint: they listen on 2 + last 4 digits of our ASN.
 	p.Endpoint = nil
-	side, _ = RenderPeerSide(cfg, p)
+	side, _ = RenderPeerSide(cfg, p, cfg.routerKey())
 	if !strings.Contains(side.WireGuard, "ListenPort = 23818") {
 		t.Errorf("default port:\n%s", side.WireGuard)
 	}

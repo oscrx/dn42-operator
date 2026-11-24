@@ -1,6 +1,7 @@
 package autopeer
 
 import (
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	"net/http"
 	"net/url"
 	"strings"
@@ -284,5 +285,67 @@ func TestLoginButtons(t *testing.T) {
 	c.Providers[0].Icon = "https://provider.example/logo.png"
 	if err := c.complete(); err == nil {
 		t.Error("non-data icon accepted")
+	}
+}
+
+func TestSuggest(t *testing.T) {
+	cfg := testConfig(t)
+	for _, c := range []struct {
+		id         Identity
+		name, addr string
+	}{
+		{Identity{Subject: "OSCRX-MNT", ASNs: []int64{4242421234}}, "oscrx", "fe80::1234"},
+		{Identity{Subject: "h", Name: "Some-Net_42-MNT", ASNs: []int64{4242423818, 4242420042}}, "somenet42", "fe80::42"},
+		{Identity{Subject: "e4358a", Name: "9LIVES-MNT", ASNs: []int64{4201270001}}, "", "fe80::1"},
+		{Identity{Subject: "OSCRX-MNT", ASNs: []int64{4242421234}, Admin: true}, "", ""},
+	} {
+		if n, a := Suggest(cfg, &c.id); n != c.name || a != c.addr {
+			t.Errorf("%+v: %q %q, want %q %q", c.id, n, a, c.name, c.addr)
+		}
+	}
+}
+
+func TestPeerDetailsAndMTU(t *testing.T) {
+	a := loggedIn(t, nil)
+	// The new-peering form suggests the link-local from the first ASN.
+	if _, body := a.get("/peer/new"); !strings.Contains(body, `value="fe80::10"`) {
+		t.Errorf("no suggested link-local:\n%s", body)
+	}
+	// IPv4 endpoints are refused; an MTU is written to the file.
+	f := peerForm(a, "mine", "fe80::1")
+	f.Set("endpoint", "192.0.2.1:23818")
+	if code, body := a.post("/peer", f); code != 422 || !strings.Contains(body, "IPv6 only") {
+		t.Errorf("IPv4 endpoint: %d", code)
+	}
+	f.Set("endpoint", "")
+	f.Set("mtu", "1200")
+	if code, _ := a.post("/peer", f); code != 422 {
+		t.Errorf("MTU out of range: %d", code)
+	}
+	f.Set("mtu", "1380")
+	if code, body := a.post("/peer", f); code != 200 || !strings.Contains(body, "MTU = 1380") {
+		t.Fatalf("submit: %d\n%s", code, body)
+	}
+	obj, _ := ParsePeerFile(a.repo.PRs[0].Content)
+	if obj.Spec.MTU == nil || *obj.Spec.MTU != 1380 {
+		t.Errorf("mtu: %v", obj.Spec.MTU)
+	}
+
+	// Once live, the details page shows the config with our key from the
+	// status (here a keyRef peer's own key, not the shared one).
+	own, _ := wgtypes.GeneratePrivateKey()
+	hand := existingPeer("hand", 4242420011, 20011, "fe80::11")
+	hand.Spec.KeyRef = "hand"
+	b, _ := PeerYAML(&hand)
+	a.repo.Files[PeerFileName("peers", &hand)] = b
+	live := hand
+	live.Status.PublicKey = own.PublicKey().String()
+	live.Status.BGPState = "Established"
+	a.live = []dn42v1.DN42Peer{live}
+	_, body := a.get("/peer/edit?name=hand")
+	for _, want := range []string{"PublicKey = " + own.PublicKey().String(), "Established", "fe80::11", "MTU = 1420"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("details page has no %q:\n%s", want, body)
+		}
 	}
 }

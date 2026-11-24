@@ -3,8 +3,8 @@ name: dn42-operator
 description: DN42 router on Kubernetes - WireGuard links and BIRD BGP sessions from DN42Peer resources, with BIRD in its own DaemonSet
 type: application
 # Chart version tracks the application release; they are bumped together.
-version: 0.3.5
-appVersion: "0.3.5"
+version: 0.3.6
+appVersion: "0.3.6"
 kubeVersion: ">=1.29.0-0"
 home: https://github.com/oscrx/dn42-operator
 sources:
@@ -22,7 +22,7 @@ annotations:
   artifacthub.io/prerelease: "false"
   artifacthub.io/images: |
     - name: dn42-operator
-      image: ghcr.io/oscrx/dn42-operator:0.3.5
+      image: ghcr.io/oscrx/dn42-operator:0.3.6
   artifacthub.io/links: |
     - name: source
       url: https://github.com/oscrx/dn42-operator

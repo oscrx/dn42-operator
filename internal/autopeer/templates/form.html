@@ -10,12 +10,14 @@
 {{else}}<label for="asn">Your ASN</label>
 <select id="asn" name="asn">{{$sel := index .Form "asn"}}{{$own := .RouterASN}}{{range .Session.Identity.ASNs}}{{if ne . $own}}<option value="{{.}}"{{if eq (printf "%d" .) $sel}} selected{{end}}>AS{{.}}</option>{{end}}{{end}}</select>{{end}}
 <label for="name">Name</label><input id="name" name="name" value="{{index .Form "name"}}" required maxlength="12" pattern="[a-z][a-z0-9]{0,11}">
-<small>1-12 lowercase letters/digits, e.g. your network name plus a location. Our interface will be wg-&lt;name&gt;.</small>
+<small>1-12 lowercase letters/digits; suggested from your maintainer. Our interface will be wg-&lt;name&gt;.</small>
 <label for="publicKey">Your WireGuard public key</label><input id="publicKey" name="publicKey" value="{{index .Form "publicKey"}}" required maxlength="44">
 <label for="endpoint">Your endpoint (optional)</label><input id="endpoint" name="endpoint" value="{{index .Form "endpoint"}}" placeholder="[2001:db8::1]:23818 or host.example.net:23818">
-<small>Without it, you connect to us and we only answer.</small>
+<small>IPv6 only: an IPv6 address, or a hostname with an AAAA record. Without it, you connect to us and we only answer.</small>
 <label for="neighbor">Your link-local address</label><input id="neighbor" name="neighbor" value="{{index .Form "neighbor"}}" required placeholder="fe80::1234">
-<small>Used as the BGP neighbor. Ours is shown after submitting.</small>
+<small>Used as the BGP neighbor; suggested from your ASN. Ours is <code>{{.OurLinkLocal}}</code>.</small>
+<label for="mtu">MTU (optional)</label><input id="mtu" name="mtu" value="{{index .Form "mtu"}}" inputmode="numeric" placeholder="1420">
+<small>Lower it if your path has extra encapsulation, e.g. 1380 behind a tunnel. 1280-1500.</small>
 <button>Submit</button>
 </form>
 </section>

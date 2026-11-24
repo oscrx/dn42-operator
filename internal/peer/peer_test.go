@@ -122,9 +122,11 @@ func TestEndpointHostname(t *testing.T) {
 	if ep.Host != "nl-ams.dn42.iedon.net" || ep.Port != 60887 {
 		t.Errorf("%+v", ep)
 	}
-	ep, err = ParseEndpoint("192.0.2.1:51820")
-	if err != nil || ep.String() != "192.0.2.1:51820" {
-		t.Errorf("%v %v", ep, err)
+	// IPv6 only.
+	for _, bad := range []string{"192.0.2.1:51820", "[::ffff:192.0.2.1]:51820"} {
+		if _, err := ParseEndpoint(bad); err == nil || !strings.Contains(err.Error(), "IPv6 only") {
+			t.Errorf("%s: %v", bad, err)
+		}
 	}
 }
 

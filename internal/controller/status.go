@@ -110,6 +110,7 @@ func buildStatus(obj *dn42v1.DN42Peer, pr *peerResult, st *netdev.State, proto *
 	s.ObservedGeneration = pr.generation
 	s.Interface = pr.iface
 	s.ListenPort = pr.listenPort
+	s.PublicKey = pr.publicKey
 	s.Link = pr.link
 	gen := pr.generation
 

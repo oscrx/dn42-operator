@@ -1,6 +1,7 @@
 package autopeer
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -127,7 +128,10 @@ type app struct {
 	srv  *httptest.Server
 	c    *http.Client
 	repo *FakeRepo
+	live []dn42v1.DN42Peer // what the cluster reports
 }
+
+func (a *app) Peers(context.Context) ([]dn42v1.DN42Peer, error) { return a.live, nil }
 
 func newApp(t *testing.T, providers ...ProviderConfig) *app {
 	return newAppCfg(t, nil, providers...)
@@ -144,7 +148,7 @@ func newAppCfg(t *testing.T, mut func(*Config), providers ...ProviderConfig) *ap
 		mut(cfg)
 	}
 	cookies, _ := NewCookies(make([]byte, 32), false)
-	h = NewServer(cfg, testRegistry(t), a.repo, nil, cookies).Handler()
+	h = NewServer(cfg, testRegistry(t), a.repo, a, cookies).Handler()
 	jar, _ := cookiejar.New(nil)
 	a.c = &http.Client{Jar: jar, Timeout: 10 * time.Second}
 	return a
@@ -297,7 +301,7 @@ func TestHomeShowsOwnPeersOnly(t *testing.T) {
 	a.repo.Files["peers/4242420010-mine.yaml"] = mine
 	a.repo.Files["peers/4242420011-theirs.yaml"] = theirs
 	_, body := a.get("/login/x")
-	if !strings.Contains(body, "<td>mine</td>") || strings.Contains(body, "theirs") {
+	if !strings.Contains(body, `?name=mine">mine</a></td>`) || strings.Contains(body, "theirs") {
 		t.Errorf("home:\n%s", body)
 	}
 }
@@ -379,7 +383,7 @@ func TestAdmin(t *testing.T) {
 	a = newAppCfg(t, func(c *Config) { c.Admin.Enabled = true }, prov(idp.srv.URL))
 	seed(a)
 	_, body := a.get("/login/x")
-	if !strings.Contains(body, "<strong>admin</strong>") || !strings.Contains(body, "<td>theirs</td>") ||
+	if !strings.Contains(body, "<strong>admin</strong>") || !strings.Contains(body, `?name=theirs">theirs</a></td>`) ||
 		!strings.Contains(body, `href="/peer/edit?name=theirs"`) {
 		t.Fatalf("admin home:\n%s", body)
 	}
@@ -421,7 +425,7 @@ func TestAdmin(t *testing.T) {
 	}
 	code, body := a.post("/peer/edit", url.Values{"csrf": {a.csrf()}, "name": {"hand"}, "publicKey": {theirPub},
 		"endpoint": {"[2001:db8::12]:20012"}, "neighbor": {"fe80::12"}})
-	if code != 200 || !strings.Contains(body, "its own key on our side") {
+	if code != 200 || !strings.Contains(body, "[Peer]") {
 		t.Fatalf("admin edit of a keyRef peer: %d\n%s", code, body)
 	}
 	pr := a.repo.PRs[len(a.repo.PRs)-1]
