@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /peer/new", s.newPeer)
 	mux.HandleFunc("POST /peer", s.submitPeer)
+	mux.HandleFunc("GET /peer/remove", s.confirmRemove)
 	mux.HandleFunc("POST /peer/remove", s.removePeer)
 	mux.HandleFunc("GET /peer/edit", s.editPeerForm)
 	mux.HandleFunc("POST /peer/edit", s.editPeer)
@@ -496,6 +497,21 @@ func (s *Server) postForm(w http.ResponseWriter, r *http.Request) *Session {
 		return nil
 	}
 	return sess
+}
+
+// confirmRemove asks before removing a peering (the page runs no scripts,
+// so no confirm() dialog).
+func (s *Server) confirmRemove(w http.ResponseWriter, r *http.Request) {
+	sess := s.session(r)
+	if sess == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	target, _, _, _ := s.ownAutopeer(w, r, sess, r.URL.Query().Get("name"))
+	if target == nil {
+		return
+	}
+	s.render(w, http.StatusOK, "confirm-remove.html", map[string]any{"Session": sess, "Peer": target})
 }
 
 func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,12 @@
+{{define "confirm-remove.html"}}{{template "head" .}}
+<section class="card">
+<h2>Remove {{.Peer.Name}} <span class="muted">AS{{.Peer.Spec.ASN}}</span>?</h2>
+<p>This opens a pull request deleting the peering. Once it is merged, the tunnel and BGP session are removed on our side; you can then remove your side. To come back later, request a new peering.</p>
+<form method="post" action="/peer/remove" class="inline">
+<input type="hidden" name="csrf" value="{{.Session.CSRF}}">
+<input type="hidden" name="name" value="{{.Peer.Name}}">
+<button class="danger">Yes, remove {{.Peer.Name}}</button>
+</form>
+<a class="cancel" href="/peer/edit?name={{.Peer.Name}}">Cancel</a>
+</section>
+{{template "foot" .}}{{end}}

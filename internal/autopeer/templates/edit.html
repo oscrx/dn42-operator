@@ -29,4 +29,9 @@
 <button>Submit change</button>
 </form>
 </section>
+<section class="card">
+<h2>Remove</h2>
+<p>Ends the peering: a pull request deletes it, then the tunnel and session go down.</p>
+<a class="danger" href="/peer/remove?name={{.Peer.Name}}">Remove {{.Peer.Name}}…</a>
+</section>
 {{template "foot" .}}{{end}}

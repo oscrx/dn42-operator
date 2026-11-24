@@ -138,8 +138,16 @@ func TestRemovePeer(t *testing.T) {
 	}
 	_, body := a.get("/")
 	// Peers with their own key (keyRef) are removable like any other.
-	if !strings.Contains(body, `name="name" value="mine"`) || !strings.Contains(body, `name="name" value="hand"`) {
-		t.Errorf("remove buttons:\n%s", body)
+	if !strings.Contains(body, `href="/peer/remove?name=mine"`) || !strings.Contains(body, `href="/peer/remove?name=hand"`) {
+		t.Errorf("remove links:\n%s", body)
+	}
+	// Remove asks first; the confirmation page itself changes nothing.
+	if code, body := a.get("/peer/remove?name=mine"); code != 200 || !strings.Contains(body, "Yes, remove mine") ||
+		!strings.Contains(body, `action="/peer/remove"`) || len(a.repo.PRs) != 0 {
+		t.Errorf("confirmation: %d PRs %d\n%s", code, len(a.repo.PRs), body)
+	}
+	if code, _ := a.get("/peer/remove?name=other"); code != http.StatusNotFound {
+		t.Errorf("confirmation for someone else's peer: %d", code)
 	}
 	csrf := a.csrf()
 	rm := func(name string) int {
