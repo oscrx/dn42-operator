@@ -137,7 +137,7 @@ pass every 60s. Status and metrics are written every 30s.
 - `router.yaml`: two DaemonSets on nodes labelled `dn42.oscarr.nl/router=true`,
   host network, privileged. BIRD and the operator are separate pods so an
   operator update never restarts BIRD; `dn42-bird` uses `OnDelete`. They
-  share `/var/run/bird` (socket) and `/var/lib/dn42-router/peers` (snippets)
+  share `/var/run/dn42-bird` (socket) and `/var/lib/dn42-router/peers` (snippets)
   on the host. bird.conf is a fixed-name ConfigMap mounted as a directory,
   and `--bird-config` makes the operator `configure` BIRD when it changes.
   Earlier layout, for reference: one pod with two containers:
@@ -146,8 +146,9 @@ pass every 60s. Status and metrics are written every 30s.
   - `operator`
   
   The two share `/etc/bird/peers` and `/run/bird` as emptyDirs.
-  `images/bird/Dockerfile` is the BIRD image (`make bird-image`); the
-  integration tests run on it too.
+  `images/bird/Dockerfile` is the BIRD image (`make bird-image`), built from
+  the upstream source at a pinned tag and commit; the integration tests run
+  on it too. It is published as `ghcr.io/oscrx/bird2:<BIRD version>`.
 - `service-endpoint.yaml`: the floating LoadBalancer endpoint with
   `externalTrafficPolicy: Local`. Keep a placeholder port in git and tell
   ArgoCD to ignore `spec.ports`.
@@ -368,16 +369,18 @@ Same conventions as tlsa-dnsendpoint-controller; see
   - the k3s test (on main)
 - `release.yaml`, on a `v*` tag:
   - tests first, without any cache
-  - signed images: `ghcr.io/oscrx/dn42-operator`, `dn42-autopeer` and `bird2`
+  - signed images: `ghcr.io/oscrx/dn42-operator` and `dn42-autopeer`
   - then the GitHub release
+- `bird-image.yaml`, when `images/bird/` changes on main: integration tests,
+  then `ghcr.io/oscrx/bird2` tagged with the BIRD version (`2.18.3`, `2.18`,
+  `2.18.3-<commit>`), signed
 - Actions and base images are pinned by digest. Renovate keeps them current
   and automerges digests and minor bumps once CI is green. Kubernetes minors
-  and the BIRD base image are reviewed by hand.
+  and BIRD releases are reviewed by hand. BIRD stays on 2.x; a patch and a
+  newer minor come as separate PRs.
 
 `make verify` runs the test and lint jobs locally; `make help` lists the
-rest. None of the workflows has run on GitHub yet. Locally they pass
-actionlint and zizmor, the Renovate config validates, and their commands
-pass.
+rest.
 
 ## License
 

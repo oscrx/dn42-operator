@@ -40,6 +40,15 @@
       "datasourceTemplate": "go"
     },
     {
+      "description": "BIRD, built from source in images/bird: the tag and its commit move together (the build checks one against the other).",
+      "customType": "regex",
+      "managerFilePatterns": ["/^images/bird/Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) registryUrl=(?<registryUrl>\\S+)\\s+ARG BIRD_TAG=(?<currentValue>\\S+)\\s+ARG BIRD_COMMIT=(?<currentDigest>[0-9a-f]{40})"
+      ],
+      "versioningTemplate": "regex:^v(?<major>\\d+)\\.(?<minor>\\d+)(?:\\.(?<patch>\\d+))?$"
+    },
+    {
       "description": "make lint pins the same golangci-lint as ci.yaml.",
       "customType": "regex",
       "managerFilePatterns": ["/^Makefile$/"],
@@ -86,8 +95,17 @@
       "automerge": false
     },
     {
-      "description": "The BIRD image's Debian base changes BIRD itself (2.17 today). A BIRD minor can change behaviour on the router, and the dn42-bird DaemonSet only restarts by hand, so review it.",
+      "description": "BIRD itself. Stay on BIRD 2 (3 is a different daemon); a patch of the current minor and a newer minor are separate PRs, so a fix never waits on a minor upgrade. Review every release by hand: it changes the router, and the dn42-bird DaemonSet only restarts by hand.",
+      "matchPackageNames": ["labs/bird"],
+      "allowedVersions": "/^v2\\./",
+      "separateMinorPatch": true,
+      "automerge": false,
+      "labels": ["bird"]
+    },
+    {
+      "description": "The BIRD image's Debian base only brings libraries and iproute2 now; digest updates can automerge like the others, a new Debian release is reviewed.",
       "matchFileNames": ["images/bird/Dockerfile"],
+      "matchDatasources": ["docker"],
       "matchUpdateTypes": ["major", "minor"],
       "automerge": false
     },

@@ -71,11 +71,8 @@ jobs:
             image: ghcr.io/oscrx/dn42-autopeer
             context: .
             target: autopeer
-          # BIRD for the dn42-bird DaemonSet, versioned with the operator.
-          - name: bird
-            image: ghcr.io/oscrx/bird2
-            context: images/bird
-            target: ""
+          # bird2 follows BIRD's version and has its own workflow
+          # (bird-image.yaml).
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
