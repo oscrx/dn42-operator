@@ -93,9 +93,11 @@ type ProviderConfig struct {
 	clientSecret string
 }
 
-// RegistryConfig points at a clone of the DN42 registry.
+// RegistryConfig points at a clone of the DN42 registry. It is only needed
+// to map mntner claims to ASNs; with providers that return the ASN itself,
+// leave Path empty and run without a registry (and without a clone).
 type RegistryConfig struct {
-	Path string `json:"path"` // contains data/aut-num
+	Path string `json:"path"` // contains data/aut-num; empty: no registry
 	// Refresh reloads the registry from disk at this interval (0: never).
 	Refresh Duration `json:"refresh"`
 	// Pull runs "git pull --ff-only" before each reload. Leave it off when a
@@ -236,6 +238,9 @@ func (c *Config) complete() error {
 		}
 		if p.Claims.ASN == "" && p.Claims.Mntner == "" {
 			return fmt.Errorf("provider %s: set claims.asn and/or claims.mntner", p.Name)
+		}
+		if p.Claims.Mntner != "" && c.Registry.Path == "" {
+			return fmt.Errorf("provider %s: claims.mntner needs registry.path (mntners are mapped to ASNs through the registry)", p.Name)
 		}
 	}
 	if c.GitHub.APIURL == "" {

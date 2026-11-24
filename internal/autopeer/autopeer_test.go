@@ -31,6 +31,11 @@ func testConfig(t *testing.T, providers ...ProviderConfig) *Config {
 		Router:    RouterConfig{ASN: 4242423818, Name: "oscrx", EndpointHost: "2001:db8::4242", PublicKey: ourPub},
 		Providers: providers,
 	}
+	for _, p := range providers {
+		if p.Claims.Mntner != "" {
+			c.Registry.Path = "/registry" // the tests pass testRegistry to the server
+		}
+	}
 	if err := c.complete(); err != nil {
 		t.Fatal(err)
 	}
@@ -297,6 +302,15 @@ func TestConfigChecks(t *testing.T) {
 	c.Providers[0].Issuer = ""
 	if err := c.complete(); err == nil {
 		t.Error("provider without endpoints accepted")
+	}
+	c = testConfig(t)
+	c.Providers[0].Claims.Mntner = "mnt"
+	if err := c.complete(); err == nil {
+		t.Error("mntner claim without registry.path accepted")
+	}
+	c.Registry.Path = "/registry"
+	if err := c.complete(); err != nil {
+		t.Errorf("mntner claim with registry.path: %v", err)
 	}
 }
 

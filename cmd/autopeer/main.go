@@ -50,8 +50,13 @@ func run(configPath string, fakeRepo bool) error {
 	if err != nil {
 		return err
 	}
-	reg := &registry.Registry{Path: cfg.Registry.Path}
-	regErr := reg.Load() // the git-sync sidecar may not have cloned yet
+	// Only for mntner claims; without registry.path there is no registry.
+	var reg *registry.Registry
+	var regErr error
+	if cfg.Registry.Path != "" {
+		reg = &registry.Registry{Path: cfg.Registry.Path}
+		regErr = reg.Load() // the git-sync sidecar may not have cloned yet
+	}
 
 	var repo autopeer.PeerRepo
 	if fakeRepo {
@@ -80,6 +85,9 @@ func run(configPath string, fakeRepo bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go func() {
+		if reg == nil {
+			return
+		}
 		for regErr != nil {
 			ctrl.Log.Info("registry not loaded yet, mntner logins find no ASNs until it is", "error", regErr.Error())
 			select {

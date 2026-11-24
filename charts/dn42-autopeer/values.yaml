@@ -29,12 +29,11 @@ existingSecret: dn42-autopeer
 # Empty: no Role (and set config.kubernetes.enabled: false).
 peersNamespace: dn42-router
 
-# Keeps a clone of the DN42 registry fresh for the ownership check. The
-# registry needs an account: the token is the registry-token key of
-# existingSecret.
+# Keeps a clone of the DN42 registry fresh. Only needed for mntner claims
+# (mntner -> ASNs): providers that return the ASN itself need no registry,
+# so leave this off and config.registry unset. The registry needs an
+# account: the token is the registry-token key of existingSecret.
 gitSync:
-  # Off by default only because the username is site-specific; the
-  # ownership check via mntner claims needs the registry.
   enabled: false
   image:
     repository: registry.k8s.io/git-sync/git-sync
