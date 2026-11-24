@@ -105,16 +105,38 @@ func (g *fakeGitHub) handler() http.Handler {
 				}
 			}
 			_ = json.NewEncoder(w).Encode(out)
-		case r.Method == http.MethodDelete && strings.HasPrefix(p, "/contents/"):
-			var in map[string]string
+		case r.Method == http.MethodPost && r.URL.Path == "/graphql":
+			var in struct {
+				Query     string `json:"query"`
+				Variables struct {
+					Input struct {
+						Branch struct {
+							Repo string `json:"repositoryNameWithOwner"`
+							Name string `json:"branchName"`
+						} `json:"branch"`
+						ExpectedHeadOid string `json:"expectedHeadOid"`
+						FileChanges     struct {
+							Deletions []struct {
+								Path string `json:"path"`
+							} `json:"deletions"`
+						} `json:"fileChanges"`
+					} `json:"input"`
+				} `json:"variables"`
+			}
 			_ = json.NewDecoder(r.Body).Decode(&in)
-			path := strings.TrimPrefix(p, "/contents/")
-			if in["sha"] != "blob-"+path {
-				http.Error(w, "sha mismatch", http.StatusConflict)
+			v := in.Variables.Input
+			if !strings.Contains(in.Query, "createCommitOnBranch") || v.Branch.Repo != "oscrx/dn42-peers" || v.ExpectedHeadOid == "" {
+				_, _ = w.Write([]byte(`{"errors":[{"message":"bad request"}]}`))
 				return
 			}
-			g.deleted[in["branch"]+"/"+path] = true
-			_, _ = w.Write([]byte("{}"))
+			for _, d := range v.FileChanges.Deletions {
+				if _, ok := g.files[d.Path]; !ok {
+					_, _ = w.Write([]byte(`{"errors":[{"message":"no such file"}]}`))
+					return
+				}
+				g.deleted[v.Branch.Name+"/"+d.Path] = true
+			}
+			_, _ = w.Write([]byte(`{"data":{"createCommitOnBranch":{"commit":{"oid":"c0ffee"}}}}`))
 		case r.Method == http.MethodGet && strings.HasPrefix(p, "/contents/peers/"):
 			c, ok := g.files[strings.TrimPrefix(p, "/contents/")]
 			if !ok {
@@ -230,12 +252,17 @@ func TestGitHubApp(t *testing.T) {
 		pend[0].URL != "https://github.com/oscrx/dn42-peers/pull/1" {
 		t.Fatalf("pending: %+v %v", pend, err)
 	}
-	// A removal PR: branch, delete with the blob sha, PR.
+	// A removal PR: branch, a signed GraphQL commit deleting the file, PR.
 	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/rm", Path: "peers/4242420001-old.yaml", Delete: true, Title: "Remove"}); err != nil {
 		t.Fatal(err)
 	}
 	if !fg.deleted["autopeer/rm/peers/4242420001-old.yaml"] {
 		t.Errorf("deleted: %v", fg.deleted)
+	}
+	// A GraphQL error fails the PR.
+	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/rm2", Path: "peers/4242420099-none.yaml", Delete: true, Title: "Remove"}); err == nil ||
+		!strings.Contains(err.Error(), "no such file") {
+		t.Errorf("graphql error: %v", err)
 	}
 	// Updating an existing file sends its sha.
 	if _, err := gh.OpenPR(t.Context(), &PullRequest{Branch: "autopeer/edit", Path: "peers/4242420001-old.yaml", Content: []byte("v2"), Title: "Update"}); err != nil {
@@ -274,5 +301,16 @@ func TestGitHubApp(t *testing.T) {
 	bad := &GitHubApp{Key: other, HTTPClient: srv.Client(), Cfg: gh.Cfg}
 	if _, err := bad.ListPeers(t.Context()); err == nil {
 		t.Error("wrong key accepted")
+	}
+}
+
+func TestGraphQLURL(t *testing.T) {
+	for api, want := range map[string]string{
+		"https://api.github.com":      "https://api.github.com/graphql",
+		"https://ghe.example/api/v3/": "https://ghe.example/api/graphql",
+	} {
+		if got := (&GitHubApp{Cfg: GitHubConfig{APIURL: api}}).graphqlURL(); got != want {
+			t.Errorf("%s: %s, want %s", api, got, want)
+		}
 	}
 }

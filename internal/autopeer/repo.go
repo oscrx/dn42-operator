@@ -252,6 +252,10 @@ type HTTPError struct {
 func (e *HTTPError) Error() string { return fmt.Sprintf("github: HTTP %d: %s", e.Status, e.Body) }
 
 func (g *GitHubApp) do(ctx context.Context, auth, method, p string, in, out any) error {
+	return g.doURL(ctx, auth, method, strings.TrimRight(g.Cfg.APIURL, "/")+p, in, out)
+}
+
+func (g *GitHubApp) doURL(ctx context.Context, auth, method, u string, in, out any) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -260,7 +264,7 @@ func (g *GitHubApp) do(ctx context.Context, auth, method, p string, in, out any)
 		}
 		body = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(g.Cfg.APIURL, "/")+p, body)
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
 		return err
 	}
@@ -291,6 +295,41 @@ func (g *GitHubApp) api(ctx context.Context, method, p string, in, out any) erro
 		return err
 	}
 	return g.do(ctx, "token "+tok, method, p, in, out)
+}
+
+// graphqlURL is the GraphQL endpoint next to the REST API: /graphql on
+// api.github.com, /api/graphql on GitHub Enterprise (REST at /api/v3).
+func (g *GitHubApp) graphqlURL() string {
+	base := strings.TrimRight(g.Cfg.APIURL, "/")
+	if b, ok := strings.CutSuffix(base, "/api/v3"); ok {
+		return b + "/api/graphql"
+	}
+	return base + "/graphql"
+}
+
+// graphql runs one GraphQL request as the installation.
+func (g *GitHubApp) graphql(ctx context.Context, query string, vars map[string]any, out any) error {
+	tok, err := g.installationToken(ctx)
+	if err != nil {
+		return err
+	}
+	var resp struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := g.doURL(ctx, "token "+tok, http.MethodPost, g.graphqlURL(),
+		map[string]any{"query": query, "variables": vars}, &resp); err != nil {
+		return err
+	}
+	if len(resp.Errors) > 0 {
+		return fmt.Errorf("graphql: %s", resp.Errors[0].Message)
+	}
+	if out != nil {
+		return json.Unmarshal(resp.Data, out)
+	}
+	return nil
 }
 
 func (g *GitHubApp) repoPath(format string, args ...any) string {
@@ -374,13 +413,22 @@ func (g *GitHubApp) OpenPR(ctx context.Context, pr *PullRequest) (string, error)
 		return "", fmt.Errorf("create branch: %w", err)
 	}
 	if pr.Delete {
-		var cur contentEntry
-		if err := g.api(ctx, http.MethodGet, g.repoPath("/contents/%s?ref=%s", escapePath(pr.Path), url.QueryEscape(pr.Branch)), nil, &cur); err != nil {
-			return "", fmt.Errorf("find file: %w", err)
+		// GraphQL, not the contents API: GitHub signs App commits made with
+		// createCommitOnBranch, deletions included, but leaves contents-API
+		// deletions unsigned, and the peers repo requires signed commits.
+		const q = `mutation($input: CreateCommitOnBranchInput!) {
+  createCommitOnBranch(input: $input) { commit { oid } }
+}`
+		input := map[string]any{
+			"branch": map[string]string{
+				"repositoryNameWithOwner": g.Cfg.Owner + "/" + g.Cfg.Repo,
+				"branchName":              pr.Branch,
+			},
+			"message":         map[string]string{"headline": pr.Title},
+			"expectedHeadOid": ref.Object.SHA,
+			"fileChanges":     map[string]any{"deletions": []map[string]string{{"path": pr.Path}}},
 		}
-		if err := g.api(ctx, http.MethodDelete, g.repoPath("/contents/%s", escapePath(pr.Path)), map[string]string{
-			"message": pr.Title, "sha": cur.SHA, "branch": pr.Branch,
-		}, nil); err != nil {
+		if err := g.graphql(ctx, q, map[string]any{"input": input}, nil); err != nil {
 			return "", fmt.Errorf("delete file: %w", err)
 		}
 	} else {
