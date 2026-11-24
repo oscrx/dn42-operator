@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
@@ -215,5 +216,23 @@ func TestMTUAndLocalLinkLocal(t *testing.T) {
 		if _, err := FromSpec("zz", &s); err == nil {
 			t.Errorf("mtu %d accepted", bad)
 		}
+	}
+}
+
+func TestParsePrivateKeyClamps(t *testing.T) {
+	k, _ := wgtypes.GeneratePrivateKey()
+	raw := k
+	raw[0] |= 7    // unclamp, as a vanity-key tool may leave it
+	raw[31] |= 128 // high bit set
+	raw[31] &^= 64 // second-highest bit cleared
+	got, err := ParsePrivateKey(raw.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != k {
+		t.Error("not clamped back to the canonical key")
+	}
+	if got.PublicKey() != raw.PublicKey() {
+		t.Error("clamping changed the public key")
 	}
 }

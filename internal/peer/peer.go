@@ -255,6 +255,20 @@ func ParseKey(s string) (wgtypes.Key, error) {
 	return wgtypes.NewKey(b)
 }
 
+// ParsePrivateKey parses a private key and clamps it the way X25519 and the
+// kernel do (vanity-key tools may skip that). The public key is the same
+// either way, but the kernel reports the clamped key back, so an unclamped
+// one would look changed on every comparison.
+func ParsePrivateKey(s string) (wgtypes.Key, error) {
+	k, err := ParseKey(s)
+	if err != nil {
+		return k, err
+	}
+	k[0] &= 248
+	k[31] = (k[31] & 127) | 64
+	return k, nil
+}
+
 // ParseLinkLocal parses an IPv6 link-local unicast address without zone.
 func ParseLinkLocal(s string) (netip.Addr, error) {
 	a, err := netip.ParseAddr(s)

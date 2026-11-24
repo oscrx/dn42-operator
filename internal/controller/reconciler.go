@@ -375,7 +375,7 @@ func (r *Reconciler) leaderPass(ctx context.Context) error {
 			keep(o.Name, pr)
 			continue
 		}
-		priv, err := peer.ParseKey(strings.TrimSpace(string(raw)))
+		priv, err := peer.ParsePrivateKey(strings.TrimSpace(string(raw)))
 		if err != nil {
 			pr.tunnelReason, pr.tunnelMsg = ReasonKeyMissing, fmt.Sprintf("key %q: %v", keyName, err)
 			keep(o.Name, pr)
