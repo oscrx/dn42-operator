@@ -1,0 +1,8 @@
+author: "dn42-autopeer[bot]"
+headRef: "autopeer/admin-4242420010-kio-ab12"
+ok: false
+autoMergeable: false
+changes:
+  - "A peers/4242420010-kio.yaml"
+errorContains:
+  - 'not even as admin'

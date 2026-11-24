@@ -35,6 +35,7 @@ func run() int {
 		head         = flag.String("head", "HEAD", "head revision to check")
 		worktree     = flag.Bool("worktree", false, "read the peers dir from disk instead of git (local runs)")
 		author       = flag.String("author", "", "PR author login")
+		headRef      = flag.String("head-ref", "", "PR head branch (autopeer/admin-* from the App: an admin change)")
 		appLogins    = flag.String("app-login", "", "comma-separated logins of the autopeer GitHub App bot")
 		registryDir  = flag.String("registry-dir", "", "DN42 registry clone (data/aut-num)")
 		asnList      = flag.String("asn-list", "", "file with one ASN per line, instead of a registry clone")
@@ -82,6 +83,9 @@ func run() int {
 	}
 	if err != nil {
 		return fail("%v", err)
+	}
+	if in.PR != nil {
+		in.PR.HeadRef = *headRef
 	}
 
 	res := peercheck.Check(in, &opt)

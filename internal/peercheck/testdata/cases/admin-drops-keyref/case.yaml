@@ -1,0 +1,8 @@
+author: "dn42-autopeer[bot]"
+headRef: "autopeer/admin-edit-4242422189-iedon-ab12"
+ok: false
+autoMergeable: false
+changes:
+  - "M peers/4242422189-iedon.yaml"
+errorContains:
+  - 'not even as admin'

@@ -16,6 +16,7 @@ const app = "dn42-autopeer[bot]"
 
 type caseFile struct {
 	Author        string   `json:"author"`
+	HeadRef       string   `json:"headRef"`
 	PR            *bool    `json:"pr"`
 	OK            bool     `json:"ok"`
 	AutoMergeable bool     `json:"autoMergeable"`
@@ -70,7 +71,7 @@ func TestCases(t *testing.T) {
 			in := Input{Head: readDir(t, filepath.Join(dir, "head"))}
 			if c.PR == nil || *c.PR {
 				base := readDir(t, filepath.Join(dir, "base"))
-				pr := &PR{Author: c.Author, Base: map[string]File{}}
+				pr := &PR{Author: c.Author, HeadRef: c.HeadRef, Base: map[string]File{}}
 				for _, ch := range c.Changes {
 					st, p, _ := strings.Cut(ch, " ")
 					pr.Changes = append(pr.Changes, Change{Status: st[0], Path: p})

@@ -407,4 +407,27 @@ func TestAdmin(t *testing.T) {
 	if code, body := a.post("/peer/remove", rm); code != 200 {
 		t.Errorf("admin remove: %d\n%s", code, body)
 	}
+	if pr := a.repo.PRs[len(a.repo.PRs)-1]; !strings.HasPrefix(pr.Branch, "autopeer/admin-remove-4242420011-theirs-") || !pr.Delete {
+		t.Errorf("admin removal PR: %+v", pr)
+	}
+
+	// Hand-managed peers too: edited with their keyRef kept, and removed.
+	hand := existingPeer("hand", 4242420012, 20012, "fe80::12")
+	hand.Spec.KeyRef = "hand"
+	b, _ := PeerYAML(&hand)
+	a.repo.Files[PeerFileName("peers", &hand)] = b
+	if code, body := a.get("/peer/edit?name=hand"); code != 200 {
+		t.Fatalf("admin edit form for a hand-managed peer: %d\n%s", code, body)
+	}
+	code, body := a.post("/peer/edit", url.Values{"csrf": {a.csrf()}, "name": {"hand"}, "publicKey": {theirPub},
+		"endpoint": {"[2001:db8::12]:20012"}, "neighbor": {"fe80::12"}})
+	if code != 200 || !strings.Contains(body, "set up by hand") {
+		t.Fatalf("admin edit of a hand-managed peer: %d\n%s", code, body)
+	}
+	pr := a.repo.PRs[len(a.repo.PRs)-1]
+	obj, err := ParsePeerFile(pr.Content)
+	if err != nil || obj.Spec.KeyRef != "hand" || obj.Spec.Endpoint != "[2001:db8::12]:20012" ||
+		!strings.HasPrefix(pr.Branch, "autopeer/admin-edit-4242420012-hand-") {
+		t.Errorf("admin edit PR: %+v %v\n%s", pr, err, pr.Content)
+	}
 }

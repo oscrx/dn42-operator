@@ -47,7 +47,11 @@ type Input struct {
 
 // PR describes a pull request.
 type PR struct {
-	Author  string
+	Author string
+	// HeadRef is the PR's branch. The App opens admin changes (a login for
+	// the router's own ASN) from AdminBranchPrefix branches; only the App
+	// creates branches for its PRs, so the prefix can't be faked.
+	HeadRef string
 	Changes []Change
 	// Base holds the base versions of the peer files the PR touches.
 	Base map[string]File
@@ -340,7 +344,27 @@ func checkPR(in Input, opt *Options, res *Result) {
 		res.NotAutoMergeable = append(res.NotAutoMergeable,
 			fmt.Sprintf("auto-merge needs exactly one peer file changed, this PR changes %d", len(peerFiles)))
 	}
-	if isApp {
+	if isApp && strings.HasPrefix(pr.HeadRef, AdminBranchPrefix) {
+		// Admin: may edit or delete hand-managed peers, but never set or
+		// change a keyRef (that would point a peer at another key).
+		for _, p := range peerFiles {
+			h, inHead := in.Head[p]
+			if !inHead {
+				continue // deleted
+			}
+			headRef, ok := keyRefOf(h.Content)
+			baseRef := ""
+			if b, inBase := pr.Base[p]; inBase {
+				if baseRef, ok = keyRefOf(b.Content); !ok {
+					res.errorf(p, "base version does not parse")
+					continue
+				}
+			}
+			if !ok || headRef != baseRef {
+				res.errorf(p, "the autopeer App may not set or change keyRef, not even as admin")
+			}
+		}
+	} else if isApp {
 		// Hand-managed peers (with their own key) are never touched by the
 		// App, and the App never points a peer at someone else's key.
 		for _, p := range peerFiles {
@@ -355,7 +379,17 @@ func checkPR(in Input, opt *Options, res *Result) {
 	res.AutoMergeable = res.OK() && len(res.NotAutoMergeable) == 0
 }
 
+// AdminBranchPrefix marks the App's admin PRs (see PR.HeadRef). Normal
+// autopeer branches continue with an ASN, remove- or edit- after autopeer/.
+const AdminBranchPrefix = "autopeer/admin-"
+
 func hasKeyRef(b []byte) bool {
+	ref, ok := keyRefOf(b)
+	return !ok || ref != ""
+}
+
+// keyRefOf returns spec.keyRef; ok is false if the file doesn't parse.
+func keyRefOf(b []byte) (string, bool) {
 	var pf struct {
 		Spec struct {
 			KeyRef string `json:"keyRef"`
@@ -363,7 +397,7 @@ func hasKeyRef(b []byte) bool {
 	}
 	// Lenient on purpose: this only looks for the field.
 	if err := yaml.Unmarshal(b, &pf); err != nil {
-		return true // unparseable: treat as protected
+		return "", false
 	}
-	return pf.Spec.KeyRef != ""
+	return pf.Spec.KeyRef, true
 }

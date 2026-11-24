@@ -215,7 +215,9 @@ func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req Request, ot
 	if !id.May(cur.Spec.ASN) {
 		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", cur.Spec.ASN)}
 	}
-	if cur.Spec.KeyRef != "" {
+	// Hand-managed peers (own key, keyRef) only for admins; the keyRef
+	// itself is never changed here (DeepCopy keeps it).
+	if cur.Spec.KeyRef != "" && !id.Admin {
 		return nil, nil, &FieldError{"form", "this peering was set up by hand and can't be edited here"}
 	}
 	obj := cur.DeepCopy()
