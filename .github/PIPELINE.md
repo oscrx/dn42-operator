@@ -68,9 +68,9 @@ flowchart LR
     dispatch(["workflow_dispatch"])
     change --> it
     dispatch --> it
-    it["<b>Integration</b><br/>on the new BIRD image"] --> push["<b>bird2</b><br/>2.18.3, 2.18, 2.18.3-&lt;commit&gt;<br/>amd64 + arm64, signed"]
+    it["<b>Integration</b><br/>on the new BIRD image"] --> push["<b>bird2</b><br/>2.20.0, 2.20, 2.20.0-&lt;commit&gt;<br/>amd64 + arm64, signed"]
 ```
 
-`2.18.3` moves when the same BIRD is rebuilt (a new Debian base),
-`2.18.3-<commit>` never moves. Deployments pin a tag with its digest, and
+`2.20.0` moves when the same BIRD is rebuilt (a new Debian base),
+`2.20.0-<commit>` never moves. Deployments pin a tag with its digest, and
 `dn42-bird` restarts only by hand (`OnDelete`).

@@ -100,7 +100,7 @@ jobs:
       # Static analysis of the workflows themselves: shell injection through
       # ${{ }} interpolation, the checkout token persisting into later steps,
       # caches writable by lower-privileged workflows, over-broad permissions.
-      - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+      - uses: zizmorcore/zizmor-action@bd12b495c90993a4301c73398142281a61499af3 # v0.9.0
 
   build:
     name: Build ${{ matrix.name }} image
@@ -150,7 +150,7 @@ jobs:
       # Renovate stops raising PRs entirely when its config is invalid, which
       # is silent unless you go looking. Catch it here.
       - name: Validate
-        run: npx --yes --package renovate@44.257.9 renovate-config-validator --strict renovate.json
+        run: npx --yes --package renovate@44.259.0 renovate-config-validator --strict renovate.json
 
   manifests:
     name: Validate manifests
@@ -169,7 +169,7 @@ jobs:
       # go install verifies the module against the Go checksum database.
       - name: Install kubeconform
         run: |
-          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
           kubeconform -v
 
       - name: Validate

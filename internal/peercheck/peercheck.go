@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	yamlv3 "go.yaml.in/yaml/v3"
+	yamlv4 "go.yaml.in/yaml/v4"
 	"sigs.k8s.io/yaml"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
@@ -132,10 +132,10 @@ func (o *Options) inPeersDir(p string) bool {
 
 // countDocuments counts the YAML documents in b.
 func countDocuments(b []byte) (int, error) {
-	dec := yamlv3.NewDecoder(bytes.NewReader(b))
+	dec := yamlv4.NewDecoder(bytes.NewReader(b))
 	n := 0
 	for {
-		var node yamlv3.Node
+		var node yamlv4.Node
 		err := dec.Decode(&node)
 		if errors.Is(err, io.EOF) {
 			return n, nil

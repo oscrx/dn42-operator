@@ -6,15 +6,15 @@
 # commit: bird.network.cz refuses automated downloads, and a commit hash is as
 # strict as a tarball checksum. Renovate bumps BIRD_TAG and BIRD_COMMIT
 # together (gitlab-tags, BIRD 2 only); a new BIRD is reviewed by hand.
-# .git goes after the check, so BIRD reports its VERSION ("2.18.3") instead
+# .git goes after the check, so BIRD reports its VERSION ("2.20.0") instead
 # of a development version with the commit appended.
 # iproute2 is for debugging (ip vrf, ip -d link) and the test's VRF init
 # container.
 
 FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS build
 # renovate: datasource=gitlab-tags depName=labs/bird registryUrl=https://gitlab.nic.cz
-ARG BIRD_TAG=v2.18.3
-ARG BIRD_COMMIT=ccd9d58275e5d9c84ded6d6ac144d66acdcb1835
+ARG BIRD_TAG=v2.20.0
+ARG BIRD_COMMIT=0355729c3a546c910e20bcde423bf36da901f8b5
 RUN apt-get update -qq \
  && apt-get install -y -qq --no-install-recommends \
       ca-certificates git build-essential autoconf flex bison \

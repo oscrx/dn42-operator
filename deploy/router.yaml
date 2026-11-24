@@ -35,14 +35,14 @@ spec:
         # First start on a node: seed the shared bird.conf from the ConfigMap.
         # Later versions are copied by the operator, after configure check.
         - name: seed-config
-          image: ghcr.io/oscrx/bird2:2.18.3
+          image: ghcr.io/oscrx/bird2:2.20.0
           command: [sh, -c, "[ -s /etc/bird/live/bird.conf ] || cp /etc/bird/conf/bird.conf /etc/bird/live/bird.conf"]
           volumeMounts:
             - {name: conf, mountPath: /etc/bird/conf, readOnly: true}
             - {name: live, mountPath: /etc/bird/live}
       containers:
         - name: bird
-          image: ghcr.io/oscrx/bird2:2.18.3 # images/bird: BIRD 2.18.3, built from source (bird-image.yaml)
+          image: ghcr.io/oscrx/bird2:2.20.0 # images/bird: BIRD 2.20.0, built from source (bird-image.yaml)
           command: [bird, -f, -c, /etc/bird/live/bird.conf, -s, /var/run/dn42-bird/bird.ctl]
           securityContext: {privileged: true}
           # Signal only (nothing routes to this pod): BIRD answers its socket.

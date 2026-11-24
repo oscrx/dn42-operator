@@ -4,10 +4,10 @@ name: BIRD image
 # published whenever images/bird changes on main (a Renovate BIRD or base
 # image bump, after its PR passed CI), or by hand.
 #
-# Tags, for BIRD_TAG=v2.18.3 in images/bird/Dockerfile:
-#   2.18.3            moves on a rebuild of the same BIRD (new Debian base)
-#   2.18              moves to the newest BIRD 2.18.x
-#   2.18.3-<commit>   never moves: this repo's commit that built it
+# Tags, for BIRD_TAG=v2.20.0 in images/bird/Dockerfile:
+#   2.20.0            moves on a rebuild of the same BIRD (new Debian base)
+#   2.20              moves to the newest BIRD 2.20.x
+#   2.20.0-<commit>   never moves: this repo's commit that built it
 # Deployments pin a tag plus digest, so a rebuild reaches the router only
 # through a reviewed PR.
 

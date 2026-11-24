@@ -372,8 +372,8 @@ Same conventions as tlsa-dnsendpoint-controller; see
   - signed images: `ghcr.io/oscrx/dn42-operator` and `dn42-autopeer`
   - then the GitHub release
 - `bird-image.yaml`, when `images/bird/` changes on main: integration tests,
-  then `ghcr.io/oscrx/bird2` tagged with the BIRD version (`2.18.3`, `2.18`,
-  `2.18.3-<commit>`), signed
+  then `ghcr.io/oscrx/bird2` tagged with the BIRD version (`2.20.0`, `2.20`,
+  `2.20.0-<commit>`), signed
 - Actions and base images are pinned by digest. Renovate keeps them current
   and automerges digests and minor bumps once CI is green. Kubernetes minors
   and BIRD releases are reviewed by hand. BIRD stays on 2.x; a patch and a
