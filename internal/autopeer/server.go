@@ -152,10 +152,33 @@ type PeerView struct {
 	Routes      string
 	Valid       string
 	ValidReason string
+	Transit     TransitView
 	// Removable: no PR already pending for it (and the repo listing worked).
 	Removable bool
 	// PendingURL is an open PR for this peer.
 	PendingURL string
+}
+
+// TransitView is the operator's transit probe result as a pill: whether TCP
+// through the peer works when the replies come back via another network.
+type TransitView struct {
+	Label, Class string // "" when not probed
+	Detail       string // the probe's per-target message
+}
+
+// transitView maps status.transit; a verdict awaiting confirmation keeps
+// showing the verdict.
+func transitView(st *dn42v1.TransitStatus) TransitView {
+	switch {
+	case st == nil || st.LastResult == "":
+		return TransitView{}
+	case st.Healthy == nil:
+		return TransitView{Label: "checking", Detail: st.Message}
+	case *st.Healthy:
+		return TransitView{Label: "ok", Class: "ok", Detail: st.Message}
+	default:
+		return TransitView{Label: "broken", Class: "bad", Detail: st.Message}
+	}
 }
 
 func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error) {
@@ -202,6 +225,7 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 			if o.Status.RoutesImported != nil {
 				v.Routes = strconv.FormatInt(*o.Status.RoutesImported, 10)
 			}
+			v.Transit = transitView(o.Status.Transit)
 			for _, c := range o.Status.Conditions {
 				if c.Type == dn42v1.ConditionValid {
 					v.Valid, v.ValidReason = string(c.Status), c.Message
@@ -568,6 +592,7 @@ func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, status int, 
 	live := s.livePeer(r.Context(), target.Name)
 	if live != nil {
 		data["Live"] = live
+		data["Transit"] = transitView(live.Status.Transit)
 	}
 	if p, verr := peer.FromObject(target); verr == nil {
 		data["Our"] = p

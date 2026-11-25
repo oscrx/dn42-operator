@@ -1,7 +1,9 @@
 {{define "edit.html"}}{{template "head" .}}
 <section class="card">
 <h2>{{.Peer.Name}} <span class="muted">AS{{.Peer.Spec.ASN}}</span></h2>
-{{with .Live}}<p>{{if eq .Status.BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .Status.BGPState "not up yet"}}</span>{{end}}{{with .Status.RoutesImported}} {{.}} routes{{end}}</p>{{end}}
+{{with .Live}}<p>{{if eq .Status.BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .Status.BGPState "not up yet"}}</span>{{end}}{{with .Status.RoutesImported}} {{.}} routes{{end}}{{with $.Transit}}{{if .Label}} <span class="pill {{.Class}}" title="{{.Detail}}">transit {{.Label}}</span>{{end}}{{end}}</p>
+{{with $.Transit}}{{if eq .Label "broken"}}<p class="err">TCP through your network stalls when the replies come back via another network: our probe's handshake passes, then our packets are dropped. This is usually a stateful firewall dropping "invalid" packets on forwarded traffic; transit traffic is often asymmetric, so it shouldn't be tracked or filtered by connection state. Until it's fixed, we use you only for your own networks: routes through you to other networks get our lowest preference. We re-check hourly.</p>
+<p class="muted">{{.Detail}}</p>{{end}}{{end}}{{end}}
 {{with .LG}}<p>Looking glass: <a href="{{.}}/detail/{{$.LGServer}}/peer_{{$.Peer.Name}}">session</a> · <a href="{{.}}/route_from_protocol/{{$.LGServer}}/peer_{{$.Peer.Name}}">routes</a> · <a href="{{.}}/whois/AS{{$.Peer.Spec.ASN}}">whois AS{{$.Peer.Spec.ASN}}</a></p>{{end}}
 {{with .Our}}<table class="kv">
 <tr><th>Our endpoint</th><td><code>{{$.OurEndpoint}}</code> (IPv6 only)</td></tr>

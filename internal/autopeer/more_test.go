@@ -430,3 +430,45 @@ func TestDiscoveryFailureRemembered(t *testing.T) {
 		t.Errorf("asked the provider %d times, want 1 within the retry window", n)
 	}
 }
+
+func TestTransitShown(t *testing.T) {
+	a := loggedIn(t, nil)
+	var live []dn42v1.DN42Peer
+	f, tr := false, true
+	for _, c := range []struct {
+		name, nb string
+		asn      int64
+		port     int32
+		status   *dn42v1.TransitStatus
+	}{
+		{"bad", "fe80::1", 4242420010, 20010, &dn42v1.TransitStatus{Healthy: &f, LastResult: dn42v1.TransitBroken, Message: "dns:[fd42:d42:d42:53::1]:53: no reply via the peer"}},
+		{"good", "fe80::2", 4242420010, 20011, &dn42v1.TransitStatus{Healthy: &tr, LastResult: dn42v1.TransitHealthy}},
+		{"new", "fe80::3", 4242420011, 20012, &dn42v1.TransitStatus{LastResult: dn42v1.TransitBroken}},
+		{"none", "fe80::4", 4242420011, 20013, nil},
+	} {
+		p := existingPeer(c.name, c.asn, c.port, c.nb)
+		b, _ := PeerYAML(&p)
+		a.repo.Files[PeerFileName("peers", &p)] = b
+		p.Status.BGPState = "Established"
+		p.Status.Transit = c.status
+		live = append(live, p)
+	}
+	a.live = live
+	_, body := a.get("/")
+	for _, want := range []string{
+		`<span class="pill bad" title="dns:[fd42:d42:d42:53::1]:53: no reply via the peer">broken</span>`,
+		`<span class="pill ok" title="">ok</span>`,
+		`<span class="pill " title="">checking</span>`,
+	} {
+		if !strings.Contains(html.UnescapeString(body), want) {
+			t.Errorf("home has no %s:\n%s", want, body)
+		}
+	}
+	_, body = a.get("/peer/edit?name=bad")
+	if !strings.Contains(body, "transit broken") || !strings.Contains(body, "stateful firewall") {
+		t.Errorf("details page doesn't explain the broken transit:\n%s", body)
+	}
+	if _, body := a.get("/peer/edit?name=good"); strings.Contains(body, "stateful firewall") || !strings.Contains(body, "transit ok") {
+		t.Errorf("details page of a healthy peer:\n%s", body)
+	}
+}

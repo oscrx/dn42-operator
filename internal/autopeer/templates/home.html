@@ -7,10 +7,11 @@
 </section>
 <section class="card">
 <h2>{{if .Session.Identity.Admin}}All peerings{{else}}Your peerings{{end}}</h2>
-{{if .Peers}}<div class="table"><table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th><th></th></tr>
+{{if .Peers}}<div class="table"><table><tr><th>Name</th><th>ASN</th><th>Our port</th><th>BGP</th><th>Handshake</th><th>Routes</th><th title="TCP through your network when the replies come back another way">Transit</th><th></th></tr>
 {{$lg := .LG}}{{$srv := .LGServer}}{{range .Peers}}<tr><td>{{if .Removable}}<a href="/peer/edit?name={{.Name}}">{{.Name}}</a>{{else}}{{.Name}}{{end}}</td><td>AS{{.ASN}}</td><td>{{.ListenPort}}</td>
 <td>{{if .Live}}{{if eq .Valid "False"}}<span class="pill bad" title="{{.ValidReason}}">invalid</span>{{else if $lg}}<a class="pill {{if eq .BGPState "Established"}}ok{{else}}warn{{end}}" href="{{$lg}}/detail/{{$srv}}/peer_{{.Name}}">{{or .BGPState "—"}}</a>{{else if eq .BGPState "Established"}}<span class="pill ok">Established</span>{{else}}<span class="pill warn">{{or .BGPState "—"}}</span>{{end}}{{else}}<span class="pill">not configured yet</span>{{end}}</td>
 <td>{{or .Handshake "—"}}</td><td>{{or .Routes "—"}}</td>
+<td>{{with .Transit}}{{if .Label}}<span class="pill {{.Class}}" title="{{.Detail}}">{{.Label}}</span>{{else}}—{{end}}{{end}}</td>
 <td class="actions">{{if .PendingURL}}<a href="{{.PendingURL}}">PR open</a>{{else if .Removable}}<a href="/peer/edit?name={{.Name}}">Details</a><a class="danger" href="/peer/remove?name={{.Name}}">Remove</a>{{end}}</td></tr>{{end}}</table></div>
 {{else}}<p class="muted">None yet.</p>{{end}}
 </section>
