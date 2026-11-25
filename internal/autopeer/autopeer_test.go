@@ -332,3 +332,16 @@ func TestClaimNames(t *testing.T) {
 		t.Errorf("got %s", got)
 	}
 }
+
+func TestNotYoursMessage(t *testing.T) {
+	cfg := testConfig(t)
+	admin := &Identity{ASNs: []int64{4242423818}, Admin: true}
+	if _, _, err := BuildPeer(cfg, admin, &Request{ASN: 23143}, nil); err == nil || !strings.Contains(err.Error(), "AS23143 is not a DN42 ASN") {
+		t.Errorf("admin: %v", err)
+	}
+	user := &Identity{ASNs: []int64{4242420010, 4242420011}}
+	if _, _, err := BuildPeer(cfg, user, &Request{ASN: 4242420012}, nil); err == nil ||
+		!strings.Contains(err.Error(), "you may not manage AS4242420012; this login maintains AS4242420010, AS4242420011") {
+		t.Errorf("user: %v", err)
+	}
+}

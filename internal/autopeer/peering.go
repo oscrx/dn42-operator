@@ -65,6 +65,20 @@ type FieldError struct {
 
 func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
 
+// notYours says why id may not manage asn: for an admin it isn't a DN42 ASN
+// at all (often something else pasted into the field); for anyone else it
+// isn't among the ASNs their login maintains.
+func notYours(id *Identity, asn int64) string {
+	if id.Admin {
+		return fmt.Sprintf("AS%d is not a DN42 ASN; check the number", asn)
+	}
+	own := make([]string, len(id.ASNs))
+	for i, a := range id.ASNs {
+		own[i] = fmt.Sprintf("AS%d", a)
+	}
+	return fmt.Sprintf("you may not manage AS%d; this login maintains %s", asn, strings.Join(own, ", "))
+}
+
 // BuildPeer turns a request into a DN42Peer, checked on its own and against
 // the existing peers (name, port, ASN+neighbor). It always writes an
 // explicit listenPort: the 2+last-4-digits default when that is free,
@@ -72,7 +86,7 @@ func (e *FieldError) Error() string { return e.Field + ": " + e.Message }
 // have to guess.
 func BuildPeer(cfg *Config, id *Identity, req *Request, existing []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
 	if !id.May(req.ASN) {
-		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", req.ASN)}
+		return nil, nil, &FieldError{"asn", notYours(id, req.ASN)}
 	}
 	// Same ASN on both ends is iBGP: BIRD makes it multihop, which can't
 	// use a link-local neighbor, and it's no DN42 peering anyway.
@@ -251,7 +265,7 @@ func joinHostPort(host string, port int) string {
 // values stay. others are all other known peers (repo and pending).
 func UpdatePeer(cfg *Config, id *Identity, cur *dn42v1.DN42Peer, req *Request, others []dn42v1.DN42Peer) (*dn42v1.DN42Peer, *peer.Peer, error) {
 	if !id.May(cur.Spec.ASN) {
-		return nil, nil, &FieldError{"asn", fmt.Sprintf("you may not manage AS%d", cur.Spec.ASN)}
+		return nil, nil, &FieldError{"asn", notYours(id, cur.Spec.ASN)}
 	}
 	// A keyRef (the peer's own key on our side) is kept as it is: DeepCopy.
 	obj := cur.DeepCopy()
