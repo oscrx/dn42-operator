@@ -7,11 +7,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
+	ctrl "sigs.k8s.io/controller-runtime"
 
 	dn42v1 "github.com/oscrx/dn42-operator/api/v1alpha1"
 )
@@ -470,5 +474,63 @@ func TestTransitShown(t *testing.T) {
 	}
 	if _, body := a.get("/peer/edit?name=good"); strings.Contains(body, "stateful firewall") || !strings.Contains(body, "transit ok") {
 		t.Errorf("details page of a healthy peer:\n%s", body)
+	}
+}
+
+func TestRefusalsAreLogged(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	ctrl.SetLogger(funcr.New(func(prefix, args string) {
+		mu.Lock()
+		lines = append(lines, prefix+" "+args)
+		mu.Unlock()
+	}, funcr.Options{}))
+	t.Cleanup(func() { ctrl.SetLogger(logr.Discard()) })
+	logged := func(want ...string) string {
+		t.Helper()
+		mu.Lock()
+		defer mu.Unlock()
+	next:
+		for _, l := range lines {
+			for _, w := range want {
+				if !strings.Contains(l, w) {
+					continue next
+				}
+			}
+			return l
+		}
+		t.Errorf("no log line with %q in:\n%s", want, strings.Join(lines, "\n"))
+		return ""
+	}
+
+	a := loggedIn(t, nil)
+	form := peerForm(a, "kio", "fe80::10")
+	form.Set("publicKey", "not-a-key\nINJECTED")
+	if code, _ := a.post("/peer", form); code != 422 {
+		t.Fatalf("bad key accepted: %d", code)
+	}
+	l := logged(`"refused"`, `"status"=422`, `"field"="publicKey"`, `"asn"="4242420010"`, `"provider"="x"`)
+	if strings.Contains(l, "INJECTED") || strings.Contains(l, "not-a-key") {
+		t.Errorf("submitted value logged: %s", l)
+	}
+
+	// Error pages too, e.g. editing a peering that isn't yours.
+	a.get("/peer/edit?name=nobody")
+	logged(`"refused"`, `"status"=404`, `"path"="/peer/edit"`, `"peer"="nobody"`)
+
+	// And a submission without a session.
+	resp, err := http.PostForm(a.srv.URL+"/peer", url.Values{"asn": {"4242420010"}})
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	logged(`"refused"`, `"status"=401`, `"path"="/peer"`)
+}
+
+func TestLogText(t *testing.T) {
+	if got := logText("a\nb\u202ec"); got != "a b c" {
+		t.Errorf("control characters kept: %q", got)
+	}
+	if got := logText(strings.Repeat("é", 300)); len([]rune(got)) != 201 {
+		t.Errorf("not cut: %d runes", len([]rune(got)))
 	}
 }

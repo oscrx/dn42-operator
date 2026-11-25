@@ -101,8 +101,43 @@ func (s *Server) render(w http.ResponseWriter, status int, name string, data map
 	}
 }
 
-func (s *Server) fail(w http.ResponseWriter, status int, msg string) {
+func (s *Server) fail(w http.ResponseWriter, r *http.Request, status int, msg string) {
+	s.logRefusal(r, s.session(r), status, msg, "")
 	s.render(w, status, "error.html", map[string]any{"Message": msg})
+}
+
+// logRefusal records why a request was refused (an error page or a form
+// shown again with an error), so a visitor who gave up can be followed up
+// on. It logs the reason and who was logged in, never the submitted form.
+func (s *Server) logRefusal(r *http.Request, sess *Session, status int, msg, field string) {
+	kv := []any{"method", r.Method, "path", r.URL.Path, "status", status, "reason", logText(msg)}
+	if field != "" {
+		kv = append(kv, "field", field)
+	}
+	if a := r.PostFormValue("asn"); a != "" {
+		kv = append(kv, "asn", logText(a))
+	}
+	if n := r.FormValue("name"); n != "" {
+		kv = append(kv, "peer", logText(n))
+	}
+	if sess != nil {
+		kv = append(kv, "provider", sess.Identity.Provider, "login", sess.Identity.Login(), "asns", sess.Identity.ASNs)
+	}
+	ctrl.Log.WithName("autopeer").Info("refused", kv...)
+}
+
+// logText keeps user-influenced text to one short line.
+func logText(s string) string {
+	s = strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) || unicode.In(c, unicode.Cf) {
+			return ' '
+		}
+		return c
+	}, s)
+	if r := []rune(s); len(r) > 200 {
+		s = string(r[:200]) + "…"
+	}
+	return s
 }
 
 func (s *Server) session(r *http.Request) *Session {
@@ -251,7 +286,7 @@ func (s *Server) ownPeers(ctx context.Context, id *Identity) ([]PeerView, error)
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.Providers[r.PathValue("provider")]
 	if !ok {
-		s.fail(w, http.StatusNotFound, "Unknown login provider.")
+		s.fail(w, r, http.StatusNotFound, "Unknown login provider.")
 		return
 	}
 	base := s.Cfg.BaseFor(r.Host)
@@ -260,11 +295,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	u, err := p.AuthCodeURL(r.Context(), f)
 	if err != nil {
 		ctrl.Log.WithName("autopeer").Error(err, "login")
-		s.fail(w, http.StatusBadGateway, p.Config.DisplayName+" is not reachable right now.")
+		s.fail(w, r, http.StatusBadGateway, p.Config.DisplayName+" is not reachable right now.")
 		return
 	}
 	if err := s.Cookies.Set(w, flowCookie, f, flowTTL); err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not start the login.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not start the login.")
 		return
 	}
 	http.Redirect(w, r, u, http.StatusFound)
@@ -275,27 +310,27 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("provider")
 	p, ok := s.Providers[name]
 	if !ok {
-		s.fail(w, http.StatusNotFound, "Unknown login provider.")
+		s.fail(w, r, http.StatusNotFound, "Unknown login provider.")
 		return
 	}
 	var f Flow
 	if err := s.Cookies.Get(r, flowCookie, &f); err != nil || f.Provider != name {
-		s.fail(w, http.StatusBadRequest, "Login expired, please start again.")
+		s.fail(w, r, http.StatusBadRequest, "Login expired, please start again.")
 		return
 	}
 	s.Cookies.Clear(w, flowCookie)
 	if e := r.URL.Query().Get("error"); e != "" {
-		s.fail(w, http.StatusUnauthorized, "Login was refused by "+p.Config.DisplayName+".")
+		s.fail(w, r, http.StatusUnauthorized, "Login was refused by "+p.Config.DisplayName+".")
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("state")), []byte(f.State)) != 1 {
-		s.fail(w, http.StatusBadRequest, "Login state mismatch, please start again.")
+		s.fail(w, r, http.StatusBadRequest, "Login state mismatch, please start again.")
 		return
 	}
 	claims, err := p.Claims(r.Context(), &f, r.URL.Query().Get("code"))
 	if err != nil {
 		log.Error(err, "callback", "provider", name)
-		s.fail(w, http.StatusUnauthorized, "Login with "+p.Config.DisplayName+" failed.")
+		s.fail(w, r, http.StatusUnauthorized, "Login with "+p.Config.DisplayName+" failed.")
 		return
 	}
 	// Which claims the provider sent (names only, never values): enough to
@@ -304,13 +339,13 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 	id, err := IdentityFromClaims(p.Config, claims)
 	if err != nil {
 		log.Info("login without ASN", "provider", name, "error", err.Error())
-		s.fail(w, http.StatusForbidden, "Your login did not show any DN42 ASN you maintain.")
+		s.fail(w, r, http.StatusForbidden, "Your login did not show any DN42 ASN you maintain.")
 		return
 	}
 	id.Admin = s.Cfg.IsAdmin(id)
 	sess := Session{Identity: *id, CSRF: randomString(24)}
 	if err := s.Cookies.Set(w, sessionCookie, sess, s.Cfg.SessionTTL.Duration); err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not save the session.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not save the session.")
 		return
 	}
 	log.Info("login", "provider", name, "subject", id.Subject, "name", id.Name, "asns", id.ASNs, "admin", id.Admin)
@@ -383,12 +418,12 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	log := ctrl.Log.WithName("autopeer")
 	sess := s.session(r)
 	if sess == nil {
-		s.fail(w, http.StatusUnauthorized, "Please log in first.")
+		s.fail(w, r, http.StatusUnauthorized, "Please log in first.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
-		s.fail(w, http.StatusForbidden, "The form expired, please reload it.")
+		s.fail(w, r, http.StatusForbidden, "The form expired, please reload it.")
 		return
 	}
 	form := map[string]string{}
@@ -396,6 +431,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		form[k] = r.PostFormValue(k)
 	}
 	again := func(msg, field string) {
+		s.logRefusal(r, sess, http.StatusUnprocessableEntity, msg, field)
 		s.render(w, http.StatusUnprocessableEntity, "form.html", map[string]any{
 			"Session": sess, "Form": form, "Error": msg, "Field": field})
 	}
@@ -412,13 +448,13 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	existing, err := s.Repo.ListPeers(r.Context())
 	if err != nil {
 		log.Error(err, "list peers")
-		s.fail(w, http.StatusServiceUnavailable, "Could not check the existing peers, please try later.")
+		s.fail(w, r, http.StatusServiceUnavailable, "Could not check the existing peers, please try later.")
 		return
 	}
 	pending, err := s.Repo.PendingPeers(r.Context())
 	if err != nil {
 		log.Error(err, "pending peers")
-		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
+		s.fail(w, r, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
 		return
 	}
 	// Peers in open PRs count as taken: same name, port or neighbor can't
@@ -445,17 +481,17 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := PeerYAML(obj)
 	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
 	side, err := RenderPeerSide(s.Cfg, p, s.Cfg.routerKey()) // new: the shared key
 	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not render your config.")
 		return
 	}
 	path := PeerFileName(s.Cfg.GitHub.PeersDir, obj)
 	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
-		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		s.fail(w, r, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
@@ -468,7 +504,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error(err, "open PR", "peer", obj.Name)
-		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
+		s.fail(w, r, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
 	log.Info("peer submitted", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
@@ -481,7 +517,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Session, name string) (target *dn42v1.DN42Peer, path string, peers []dn42v1.DN42Peer, pending []Pending) {
 	peers, err := s.Repo.ListPeers(r.Context())
 	if err != nil {
-		s.fail(w, http.StatusServiceUnavailable, "Could not load the peers, please try later.")
+		s.fail(w, r, http.StatusServiceUnavailable, "Could not load the peers, please try later.")
 		return nil, "", nil, nil
 	}
 	for i := range peers {
@@ -491,18 +527,18 @@ func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Sessi
 	}
 	// Same answer for "doesn't exist" and "not yours".
 	if target == nil || !sess.Identity.May(target.Spec.ASN) {
-		s.fail(w, http.StatusNotFound, "No such peering of yours.")
+		s.fail(w, r, http.StatusNotFound, "No such peering of yours.")
 		return nil, "", nil, nil
 	}
 	path = PeerFileName(s.Cfg.GitHub.PeersDir, target)
 	pending, err = s.Repo.PendingPeers(r.Context())
 	if err != nil {
-		s.fail(w, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
+		s.fail(w, r, http.StatusServiceUnavailable, "Could not check the pending requests, please try later.")
 		return nil, "", nil, nil
 	}
 	for _, pd := range pending {
 		if pd.Path == path {
-			s.fail(w, http.StatusConflict, "There is already an open request for this peering: "+pd.URL)
+			s.fail(w, r, http.StatusConflict, "There is already an open request for this peering: "+pd.URL)
 			return nil, "", nil, nil
 		}
 	}
@@ -512,12 +548,12 @@ func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Sessi
 func (s *Server) postForm(w http.ResponseWriter, r *http.Request) *Session {
 	sess := s.session(r)
 	if sess == nil {
-		s.fail(w, http.StatusUnauthorized, "Please log in first.")
+		s.fail(w, r, http.StatusUnauthorized, "Please log in first.")
 		return nil
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
-		s.fail(w, http.StatusForbidden, "The form expired, please reload it.")
+		s.fail(w, r, http.StatusForbidden, "The form expired, please reload it.")
 		return nil
 	}
 	return sess
@@ -549,7 +585,7 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
-		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		s.fail(w, r, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
@@ -562,7 +598,7 @@ func (s *Server) removePeer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error(err, "open removal PR", "peer", target.Name)
-		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
+		s.fail(w, r, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
 	log.Info("peer removal requested", "peer", target.Name, "asn", target.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
@@ -587,6 +623,9 @@ func (s *Server) editPeerForm(w http.ResponseWriter, r *http.Request) {
 // renderEdit shows a peering: its details and the peer's config as it is
 // now, then the edit form.
 func (s *Server) renderEdit(w http.ResponseWriter, r *http.Request, status int, sess *Session, target *dn42v1.DN42Peer, form map[string]string, errMsg string) {
+	if errMsg != "" {
+		s.logRefusal(r, sess, status, errMsg, "")
+	}
 	data := map[string]any{"Session": sess, "Peer": target, "Form": form, "Error": errMsg,
 		"LG": s.Cfg.LookingGlassFor(r.Host), "LGServer": s.Cfg.LookingGlass.Server}
 	live := s.livePeer(r.Context(), target.Name)
@@ -643,21 +682,21 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 		s.renderEdit(w, r, http.StatusUnprocessableEntity, sess, target, form, fe.Message)
 		return
 	} else if err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not update the peer.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not update the peer.")
 		return
 	}
 	content, err := PeerYAML(obj)
 	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not render the peer file.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not render the peer file.")
 		return
 	}
 	side, err := RenderPeerSide(s.Cfg, p, s.ourKey(s.livePeer(r.Context(), obj.Name)))
 	if err != nil {
-		s.fail(w, http.StatusInternalServerError, "Could not render your config.")
+		s.fail(w, r, http.StatusInternalServerError, "Could not render your config.")
 		return
 	}
 	if !s.Limiter.Allow(sess.Identity.Provider + "/" + sess.Identity.Subject) {
-		s.fail(w, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
+		s.fail(w, r, http.StatusTooManyRequests, "Too many requests, please try again in an hour.")
 		return
 	}
 	prURL, err := s.Repo.OpenPR(r.Context(), &PullRequest{
@@ -670,7 +709,7 @@ func (s *Server) editPeer(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		log.Error(err, "open update PR", "peer", obj.Name)
-		s.fail(w, http.StatusBadGateway, "Could not open the pull request, please try later.")
+		s.fail(w, r, http.StatusBadGateway, "Could not open the pull request, please try later.")
 		return
 	}
 	log.Info("peer update requested", "peer", obj.Name, "asn", obj.Spec.ASN, "pr", prURL, "subject", sess.Identity.Subject, "name", sess.Identity.Name)
