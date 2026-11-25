@@ -2,9 +2,9 @@
 <section class="card">
 <h2>Submitted</h2>
 <p>Your request is in <a href="{{.PR}}">this pull request</a>. Once the checks pass it is merged and the tunnel and session come up on our side within a few minutes. Check back here for its status.</p>
-<h2>WireGuard</h2><pre>{{.Side.WireGuard}}</pre>
-<h2>BIRD</h2><pre>{{.Side.BIRD}}</pre>
-<h2>Peer file</h2><pre>{{.File}}</pre>
+<h2>WireGuard</h2><pre data-copy="the WireGuard config">{{.Side.WireGuard}}</pre>
+<h2>BIRD</h2><pre data-copy="the BIRD config">{{.Side.BIRD}}</pre>
+<h2>Peer file</h2><pre data-copy="the peer file">{{.File}}</pre>
 <p><a href="/">Back</a></p>
 </section>
 {{template "foot" .}}{{end}}

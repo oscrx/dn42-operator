@@ -2,8 +2,10 @@ package autopeer
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"html/template"
@@ -24,6 +26,19 @@ import (
 
 //go:embed templates/*.html
 var templateFS embed.FS
+
+// copyJS adds the copy buttons; served from our own origin so the CSP can
+// stay at script-src 'self'.
+//
+//go:embed static/copy.js
+var copyJS []byte
+
+// copyJSPath carries a hash of the script, so a new version isn't served
+// from a browser's cache.
+var copyJSPath = func() string {
+	h := sha256.Sum256(copyJS)
+	return "/static/copy.js?v=" + hex.EncodeToString(h[:6])
+}()
 
 var pages = template.Must(template.ParseFS(templateFS, "templates/*.html"))
 
@@ -78,13 +93,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /peer/remove", s.removePeer)
 	mux.HandleFunc("GET /peer/edit", s.editPeerForm)
 	mux.HandleFunc("POST /peer/edit", s.editPeer)
+	mux.HandleFunc("GET /static/copy.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		_, _ = w.Write(copyJS)
+	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	return securityHeaders(mux)
 }
 
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		h.ServeHTTP(w, r)
@@ -93,6 +113,8 @@ func securityHeaders(h http.Handler) http.Handler {
 
 func (s *Server) render(w http.ResponseWriter, status int, name string, data map[string]any) {
 	data["RouterASN"] = s.Cfg.Router.ASN
+	data["RouterName"] = s.Cfg.Router.Name
+	data["CopyJS"] = copyJSPath
 	data["OurLinkLocal"] = s.Cfg.routerLinkLocal().String()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
@@ -370,7 +392,37 @@ func (s *Server) newPeer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name, neighbor := Suggest(s.Cfg, &sess.Identity)
-	s.render(w, http.StatusOK, "form.html", map[string]any{"Session": sess, "Form": map[string]string{"name": name, "neighbor": neighbor}})
+	s.render(w, http.StatusOK, "form.html", map[string]any{"Session": sess, "Form": map[string]string{"name": name, "neighbor": neighbor},
+		"Ours": s.ourSide(&sess.Identity)})
+}
+
+// OurSide is what a new peer configures for us, shown before they submit.
+type OurSide struct {
+	ASN       int64
+	Endpoint  string // host, without port
+	PublicKey string
+	LinkLocal string
+	MTU       int
+	Ports     []ASNPort // our usual port for each of the login's ASNs (not for admins)
+}
+
+// ASNPort is our usual listen port for one ASN.
+type ASNPort struct {
+	ASN  int64
+	Port int
+}
+
+func (s *Server) ourSide(id *Identity) OurSide {
+	o := OurSide{ASN: s.Cfg.Router.ASN, Endpoint: s.Cfg.Router.EndpointHost, PublicKey: s.Cfg.routerKey().String(),
+		LinkLocal: s.Cfg.routerLinkLocal().String(), MTU: peer.DefaultMTU}
+	if !id.Admin {
+		for _, a := range id.ASNs {
+			if p, ok := peer.DefaultListenPort(a); ok && a != s.Cfg.Router.ASN {
+				o.Ports = append(o.Ports, ASNPort{ASN: a, Port: p})
+			}
+		}
+	}
+	return o
 }
 
 // parseMTU reads the optional MTU field: 0 for empty (the default).
@@ -433,7 +485,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	again := func(msg, field string) {
 		s.logRefusal(r, sess, http.StatusUnprocessableEntity, msg, field)
 		s.render(w, http.StatusUnprocessableEntity, "form.html", map[string]any{
-			"Session": sess, "Form": form, "Error": msg, "Field": field})
+			"Session": sess, "Form": form, "Error": msg, "Field": field, "Ours": s.ourSide(&sess.Identity)})
 	}
 	asn, err := strconv.ParseInt(form["asn"], 10, 64)
 	if err != nil {

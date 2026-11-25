@@ -1,6 +1,7 @@
 {{define "head"}}<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AS{{.RouterASN}} autopeer</title>
+<title>{{or .RouterName (printf "AS%d" .RouterASN)}} autopeer</title>
+<script src="{{.CopyJS}}" defer></script>
 <style>
 :root{color-scheme:light dark;--fg:#1d1d1f;--bg:#f4f4f6;--card:#fff;--muted:#6b6b70;--line:#e2e2e7;--accent:#2457c5;--accent-fg:#fff;--bad:#b3261e;--ok:#1b7f3b;--warn:#9a6700;--btn:#343a40;--btn-hover:#1d2124}
 @media (prefers-color-scheme:dark){:root{--fg:#ececf0;--bg:#111114;--card:#1b1b20;--muted:#9a9aa3;--line:#2e2e35;--accent:#8ab0ff;--accent-fg:#111114;--bad:#ff8a80;--ok:#6fd98f;--warn:#e3b341;--btn:#2b2f35;--btn-hover:#3a3f46}}
@@ -34,8 +35,10 @@ form.inline{display:inline}
 .card h2:not(:first-child){margin-top:1.5rem}
 table.kv th{width:9rem;vertical-align:top}table.kv td{white-space:normal;overflow-wrap:anywhere}
 code{font:.9em ui-monospace,SFMono-Regular,Menlo,monospace}
+button.copy{margin:0 0 0 .5rem;padding:.05rem .55rem;font-size:.8rem;font-weight:600;background:var(--bg);color:var(--accent);border:1px solid var(--line);border-radius:6px;vertical-align:baseline}
+.copywrap{position:relative}.copywrap>pre{padding-top:2.25rem}.copywrap>button.copy{position:absolute;top:.45rem;right:.45rem;margin:0}
 .primary{display:inline-block;margin-top:1rem;padding:.55rem 1.2rem;border-radius:8px;background:var(--accent);color:var(--accent-fg);text-decoration:none;font-weight:600}
 </style></head><body><main>
-<header><h1>AS{{.RouterASN}} <span>autopeer</span></h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.DisplayName}}</button></form>{{end}}</header>
+<header><h1>{{or .RouterName (printf "AS%d" .RouterASN)}} <span>autopeer</span></h1>{{with .Session}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Log out {{.Identity.DisplayName}}</button></form>{{end}}</header>
 {{end}}
 {{define "foot"}}</main></body></html>{{end}}

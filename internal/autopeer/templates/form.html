@@ -1,4 +1,16 @@
 {{define "form.html"}}{{template "head" .}}
+{{with .Ours}}<section class="card">
+<h2>Our side</h2>
+<p>What you configure for us. You get the complete WireGuard and BIRD config after submitting.</p>
+<table class="kv">
+<tr><th>ASN</th><td><code data-copy="our ASN">{{.ASN}}</code></td></tr>
+<tr><th>Endpoint</th><td><code data-copy="our endpoint">{{.Endpoint}}</code> (IPv6 only)</td></tr>
+<tr><th>Port</th><td>{{range $i, $p := .Ports}}{{if $i}}, {{end}}<code data-copy="our port for AS{{$p.ASN}}">{{$p.Port}}</code> for AS{{$p.ASN}}{{else}}2 + the last 4 digits of the ASN{{end}}<small>Usually; the page after submitting confirms it.</small></td></tr>
+<tr><th>Public key</th><td><code data-copy="our public key">{{.PublicKey}}</code></td></tr>
+<tr><th>Link-local</th><td><code data-copy="our link-local address">{{.LinkLocal}}</code></td></tr>
+<tr><th>MTU</th><td>{{.MTU}}, unless you set a lower one below</td></tr>
+</table>
+</section>{{end}}
 <section class="card">
 <h2>New peering</h2>
 {{with .Error}}<p class="err">{{.}}</p>{{end}}

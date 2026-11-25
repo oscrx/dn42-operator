@@ -6,14 +6,14 @@
 <p class="muted">{{.Detail}}</p>{{end}}{{end}}{{end}}
 {{with .LG}}<p>Looking glass: <a href="{{.}}/detail/{{$.LGServer}}/peer_{{$.Peer.Name}}">session</a> · <a href="{{.}}/route_from_protocol/{{$.LGServer}}/peer_{{$.Peer.Name}}">routes</a> · <a href="{{.}}/whois/AS{{$.Peer.Spec.ASN}}">whois AS{{$.Peer.Spec.ASN}}</a></p>{{end}}
 {{with .Our}}<table class="kv">
-<tr><th>Our endpoint</th><td><code>{{$.OurEndpoint}}</code> (IPv6 only)</td></tr>
-<tr><th>Our link-local</th><td><code>{{$.OurLinkLocal}}</code></td></tr>
+<tr><th>Our endpoint</th><td><code data-copy="our endpoint">{{$.OurEndpoint}}</code> (IPv6 only)</td></tr>
+<tr><th>Our link-local</th><td><code data-copy="our link-local address">{{$.OurLinkLocal}}</code></td></tr>
 <tr><th>Your link-local</th><td><code>{{.Neighbor}}</code></td></tr>
 <tr><th>Your endpoint</th><td>{{with .Endpoint}}<code>{{.}}</code>{{else}}none: you connect to us{{end}}</td></tr>
 <tr><th>MTU</th><td>{{.MTU}}</td></tr>
 </table>{{end}}
-{{with .Side}}<h2>Your WireGuard config</h2><pre>{{.WireGuard}}</pre>
-<h2>Your BIRD config</h2><pre>{{.BIRD}}</pre>{{end}}
+{{with .Side}}<h2>Your WireGuard config</h2><pre data-copy="the WireGuard config">{{.WireGuard}}</pre>
+<h2>Your BIRD config</h2><pre data-copy="the BIRD config">{{.BIRD}}</pre>{{end}}
 </section>
 <section class="card">
 <h2>Change</h2>

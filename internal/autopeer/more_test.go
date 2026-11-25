@@ -534,3 +534,42 @@ func TestLogText(t *testing.T) {
 		t.Errorf("not cut: %d runes", len([]rune(got)))
 	}
 }
+
+func TestOurSideAndCopyButtons(t *testing.T) {
+	a := loggedIn(t, nil)
+	code, body := a.get("/peer/new")
+	if code != 200 {
+		t.Fatalf("form: %d", code)
+	}
+	body = html.UnescapeString(body)
+	for _, want := range []string{
+		"<title>oscrx autopeer</title>", `<script src="` + copyJSPath + `" defer></script>`,
+		"<h2>Our side</h2>", `data-copy="our public key">` + ourPub + "<", `data-copy="our endpoint">2001:db8::4242<`,
+		`data-copy="our port for AS4242420010">20010</code> for AS4242420010`,
+		`data-copy="our port for AS4242420011">20011</code> for AS4242420011`,
+		`data-copy="our link-local address">fe80::3818<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("form has no %q:\n%s", want, body)
+		}
+	}
+	// The form shown again after an error keeps it.
+	form := peerForm(a, "kio", "fe80::10")
+	form.Set("publicKey", "bad")
+	if _, body := a.post("/peer", form); !strings.Contains(body, "<h2>Our side</h2>") {
+		t.Error("our side missing after an error")
+	}
+
+	resp, err := http.Get(a.srv.URL + "/static/copy.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	js, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/javascript") || !strings.Contains(string(js), "data-copy") {
+		t.Errorf("copy.js: %d %s", resp.StatusCode, resp.Header.Get("Content-Type"))
+	}
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "script-src 'self'") || strings.Contains(csp, "unsafe-eval") {
+		t.Errorf("CSP: %s", csp)
+	}
+}
