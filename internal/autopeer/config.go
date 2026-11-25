@@ -33,8 +33,12 @@ type Config struct {
 	// CookieKeyFile holds 32 random bytes (base64) for the session
 	// cookies (AES-GCM).
 	CookieKeyFile string `json:"cookieKeyFile"`
-	// SessionTTL is how long a login lasts (default 1h).
+	// SessionTTL is how long a login lasts without activity (default 1h);
+	// every page view extends it.
 	SessionTTL Duration `json:"sessionTTL"`
+	// SessionMaxAge ends a login this long after logging in, however
+	// active (default 12h).
+	SessionMaxAge Duration `json:"sessionMaxAge"`
 
 	Router     RouterConfig     `json:"router"`
 	Providers  []ProviderConfig `json:"providers"`
@@ -231,6 +235,12 @@ func (c *Config) complete() error {
 	}
 	if c.SessionTTL.Duration == 0 {
 		c.SessionTTL.Duration = time.Hour
+	}
+	if c.SessionMaxAge.Duration == 0 {
+		c.SessionMaxAge.Duration = 12 * time.Hour
+	}
+	if c.SessionMaxAge.Duration < c.SessionTTL.Duration {
+		return fmt.Errorf("sessionMaxAge (%s) is shorter than sessionTTL (%s)", c.SessionMaxAge.Duration, c.SessionTTL.Duration)
 	}
 	if c.PublicURL == "" {
 		return fmt.Errorf("publicURL is required")

@@ -573,3 +573,71 @@ func TestOurSideAndCopyButtons(t *testing.T) {
 		t.Errorf("CSP: %s", csp)
 	}
 }
+
+// sessionCookieFor seals a session the way the server does (the test
+// servers use an all-zero cookie key).
+func sessionCookieFor(t *testing.T, sess Session, ttl time.Duration) *http.Cookie {
+	t.Helper()
+	c, _ := NewCookies(make([]byte, 32), false)
+	rec := httptest.NewRecorder()
+	if err := c.Set(rec, sessionCookie, sess, ttl); err != nil {
+		t.Fatal(err)
+	}
+	return rec.Result().Cookies()[0]
+}
+
+func TestSlidingSession(t *testing.T) {
+	a := newAppCfg(t, nil)
+	id := Identity{Provider: "x", Subject: "s", ASNs: []int64{4242420010}}
+	get := func(ck *http.Cookie) (string, *http.Cookie) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, a.srv.URL+"/", nil)
+		req.AddCookie(ck)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		for _, c := range resp.Cookies() {
+			if c.Name == sessionCookie {
+				return string(b), c
+			}
+		}
+		return string(b), nil
+	}
+	loggedIn := func(body string) bool { return strings.Contains(body, "Log out") }
+
+	// Ten minutes left of an active login: renewed to the full hour.
+	body, renewed := get(sessionCookieFor(t, Session{Identity: id, CSRF: "c", Started: time.Now().Add(-50 * time.Minute).Unix()}, 10*time.Minute))
+	if !loggedIn(body) || renewed == nil || renewed.MaxAge < 3500 || renewed.MaxAge > 3600 {
+		t.Fatalf("not renewed: logged in %v, cookie %+v", loggedIn(body), renewed)
+	}
+	// The renewed cookie keeps the session (and its CSRF token).
+	var sess Session
+	c, _ := NewCookies(make([]byte, 32), false)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(renewed)
+	if err := c.Get(req, sessionCookie, &sess); err != nil || sess.CSRF != "c" || sess.Identity.Subject != "s" {
+		t.Errorf("renewed session %+v: %v", sess, err)
+	}
+
+	// Freshly set: not rewritten on every request.
+	if _, again := get(sessionCookieFor(t, Session{Identity: id, CSRF: "c", Started: time.Now().Unix()}, time.Hour)); again != nil {
+		t.Error("fresh cookie rewritten")
+	}
+
+	// Near the maximum (12h): renewed only up to it.
+	_, capped := get(sessionCookieFor(t, Session{Identity: id, CSRF: "c", Started: time.Now().Add(-11*time.Hour - 30*time.Minute).Unix()}, 5*time.Minute))
+	if capped == nil || capped.MaxAge > 30*60 || capped.MaxAge < 29*60 {
+		t.Errorf("renewal past the maximum: %+v", capped)
+	}
+
+	// Past the maximum, or from before Started existed: logged out.
+	if body, _ := get(sessionCookieFor(t, Session{Identity: id, CSRF: "c", Started: time.Now().Add(-13 * time.Hour).Unix()}, time.Hour)); loggedIn(body) {
+		t.Error("session past its maximum still logged in")
+	}
+	if body, _ := get(sessionCookieFor(t, Session{Identity: id, CSRF: "c"}, time.Hour)); loggedIn(body) {
+		t.Error("session without Started still logged in")
+	}
+}

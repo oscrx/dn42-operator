@@ -57,6 +57,9 @@ type StatusSource interface {
 type Session struct {
 	Identity Identity `json:"i"`
 	CSRF     string   `json:"c"`
+	// Started is when the user logged in (unix seconds), for
+	// Config.SessionMaxAge; activity renews the cookie but not this.
+	Started int64 `json:"s"`
 }
 
 // Server is the autopeer web app.
@@ -99,7 +102,43 @@ func (s *Server) Handler() http.Handler {
 		_, _ = w.Write(copyJS)
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
-	return securityHeaders(mux)
+	return securityHeaders(s.slideSession(mux))
+}
+
+// renewAfter limits how often an active session's cookie is rewritten.
+const renewAfter = 5 * time.Minute
+
+// slideSession renews a valid session cookie on activity, so a login ends
+// after SessionTTL without activity (or SessionMaxAge after logging in),
+// not SessionTTL after logging in. The CSRF token stays, so an open form
+// keeps working. Logout, the script and health checks don't renew.
+func (s *Server) slideSession(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/logout", "/healthz", "/static/copy.js":
+		default:
+			s.renew(w, r)
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
+	var sess Session
+	exp, err := s.Cookies.GetExp(r, sessionCookie, &sess)
+	if err != nil || sess.Started == 0 {
+		return
+	}
+	now := time.Now()
+	ttl := s.Cfg.SessionTTL.Duration
+	if left := time.Unix(sess.Started, 0).Add(s.Cfg.SessionMaxAge.Duration).Sub(now); left < ttl {
+		ttl = left
+	}
+	// Only when it would move the expiry by at least renewAfter.
+	if ttl <= 0 || now.Add(ttl).Sub(exp) < renewAfter {
+		return
+	}
+	_ = s.Cookies.Set(w, sessionCookie, sess, ttl)
 }
 
 func securityHeaders(h http.Handler) http.Handler {
@@ -166,6 +205,9 @@ func (s *Server) session(r *http.Request) *Session {
 	var sess Session
 	if err := s.Cookies.Get(r, sessionCookie, &sess); err != nil {
 		return nil
+	}
+	if sess.Started == 0 || time.Since(time.Unix(sess.Started, 0)) > s.Cfg.SessionMaxAge.Duration {
+		return nil // from before Started existed, or past the maximum
 	}
 	sess.Identity.Admin = s.Cfg.IsAdmin(&sess.Identity)
 	return &sess
@@ -365,7 +407,7 @@ func (s *Server) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id.Admin = s.Cfg.IsAdmin(id)
-	sess := Session{Identity: *id, CSRF: randomString(24)}
+	sess := Session{Identity: *id, CSRF: randomString(24), Started: time.Now().Unix()}
 	if err := s.Cookies.Set(w, sessionCookie, sess, s.Cfg.SessionTTL.Duration); err != nil {
 		s.fail(w, r, http.StatusInternalServerError, "Could not save the session.")
 		return
@@ -470,7 +512,7 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 	log := ctrl.Log.WithName("autopeer")
 	sess := s.session(r)
 	if sess == nil {
-		s.fail(w, r, http.StatusUnauthorized, "Please log in first.")
+		s.fail(w, r, http.StatusUnauthorized, "You're not logged in: a login ends after a while without activity. Log in again; what you entered was not saved.")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
@@ -600,7 +642,7 @@ func (s *Server) ownAutopeer(w http.ResponseWriter, r *http.Request, sess *Sessi
 func (s *Server) postForm(w http.ResponseWriter, r *http.Request) *Session {
 	sess := s.session(r)
 	if sess == nil {
-		s.fail(w, r, http.StatusUnauthorized, "Please log in first.")
+		s.fail(w, r, http.StatusUnauthorized, "You're not logged in: a login ends after a while without activity. Log in again; what you entered was not saved.")
 		return nil
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)

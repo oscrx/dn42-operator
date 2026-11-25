@@ -83,26 +83,32 @@ func (c *Cookies) Set(w http.ResponseWriter, name string, v any, ttl time.Durati
 
 // Get opens the cookie into v; an expired or tampered cookie is an error.
 func (c *Cookies) Get(r *http.Request, name string, v any) error {
+	_, err := c.GetExp(r, name, v)
+	return err
+}
+
+// GetExp is Get that also returns when the cookie expires.
+func (c *Cookies) GetExp(r *http.Request, name string, v any) (time.Time, error) {
 	ck, err := r.Cookie(name)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 	ct, err := base64.RawURLEncoding.DecodeString(ck.Value)
 	if err != nil || len(ct) < c.aead.NonceSize() {
-		return errors.New("bad cookie")
+		return time.Time{}, errors.New("bad cookie")
 	}
 	plain, err := c.aead.Open(nil, ct[:c.aead.NonceSize()], ct[c.aead.NonceSize():], []byte(name))
 	if err != nil {
-		return errors.New("bad cookie")
+		return time.Time{}, errors.New("bad cookie")
 	}
 	var s sealed
 	if err := json.Unmarshal(plain, &s); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if time.Now().Unix() > s.Exp {
-		return errors.New("cookie expired")
+		return time.Time{}, errors.New("cookie expired")
 	}
-	return json.Unmarshal(s.Data, v)
+	return time.Unix(s.Exp, 0), json.Unmarshal(s.Data, v)
 }
 
 // Clear removes a cookie.
