@@ -63,6 +63,9 @@ spec:
             - --health-probe-bind-address=[$(HOST_IP)]:{{ .Values.operator.healthProbePort }}
             - --cleanup-on-shutdown={{ .Values.operator.cleanupOnShutdown }}
             - --teardown-on-lease-loss={{ .Values.operator.teardownOnLeaseLoss }}
+            {{- if and .Values.operator.transitProbe.birdArg (not .Values.operator.transitProbe.source) }}
+            {{- fail "operator.transitProbe.birdArg needs operator.transitProbe.source" }}
+            {{- end }}
             {{- with .Values.operator.transitProbe }}
             {{- if .source }}
             - --transit-probe-source={{ .source }}

@@ -114,6 +114,11 @@ func run(c *runConfig) error {
 		return fmt.Errorf("--bird-template %q is not a plain identifier", c.birdTemplate)
 	}
 	var transitProber *ourctrl.TransitProber
+	if c.birdTransitArg && c.transitSource == "" {
+		// Without the probe nothing would ever update status.transit, so a
+		// "broken" verdict would stay in BIRD for good.
+		return errors.New("--bird-transit-arg needs the transit probe (--transit-probe-source)")
+	}
 	if c.transitSource != "" {
 		src, err := netip.ParseAddr(c.transitSource)
 		if err != nil || !src.Is6() || src.Zone() != "" || src.IsLinkLocalUnicast() {

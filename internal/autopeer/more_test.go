@@ -641,3 +641,25 @@ func TestSlidingSession(t *testing.T) {
 		t.Error("session without Started still logged in")
 	}
 }
+
+func TestOversizedBodyIsNotRead(t *testing.T) {
+	a := newAppCfg(t, nil)
+	// 1 MB of form data, no session: refused without reading it, and the
+	// refusal log doesn't parse it either.
+	body := "asn=4242420010&name=" + strings.Repeat("x", 1<<20)
+	resp, err := http.Post(a.srv.URL+"/peer", "application/x-www-form-urlencoded", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status %d", resp.StatusCode)
+	}
+	// Logged in, the form parser stops at the cap.
+	l := loggedIn(t, nil)
+	form := peerForm(l, "kio", "fe80::10")
+	form.Set("endpoint", strings.Repeat("x", 1<<20))
+	if code, _ := l.post("/peer", form); code != http.StatusForbidden {
+		t.Errorf("oversized form: %d", code)
+	}
+}

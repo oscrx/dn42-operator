@@ -141,8 +141,14 @@ func (s *Server) renew(w http.ResponseWriter, r *http.Request) {
 	_ = s.Cookies.Set(w, sessionCookie, sess, ttl)
 }
 
+// maxBody caps every request body. The forms are a few hundred bytes; the
+// cap applies before any handler (or logRefusal) parses a form, so nobody
+// can make the app read a large body, logged in or not.
+const maxBody = 16 << 10
+
 func securityHeaders(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
@@ -175,10 +181,14 @@ func (s *Server) logRefusal(r *http.Request, sess *Session, status int, msg, fie
 	if field != "" {
 		kv = append(kv, "field", field)
 	}
-	if a := r.PostFormValue("asn"); a != "" {
+	// Only what the handler already parsed: parsing here would read the
+	// body for requests refused before their form was looked at.
+	if a := r.PostForm.Get("asn"); a != "" {
 		kv = append(kv, "asn", logText(a))
 	}
-	if n := r.FormValue("name"); n != "" {
+	if n := r.PostForm.Get("name"); n != "" {
+		kv = append(kv, "peer", logText(n))
+	} else if n := r.URL.Query().Get("name"); n != "" {
 		kv = append(kv, "peer", logText(n))
 	}
 	if sess != nil {
@@ -515,7 +525,6 @@ func (s *Server) submitPeer(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, http.StatusUnauthorized, "You're not logged in: a login ends after a while without activity. Log in again; what you entered was not saved.")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
 		s.fail(w, r, http.StatusForbidden, "The form expired, please reload it.")
 		return
@@ -645,7 +654,6 @@ func (s *Server) postForm(w http.ResponseWriter, r *http.Request) *Session {
 		s.fail(w, r, http.StatusUnauthorized, "You're not logged in: a login ends after a while without activity. Log in again; what you entered was not saved.")
 		return nil
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
 	if err := r.ParseForm(); err != nil || !s.checkCSRF(r, sess) {
 		s.fail(w, r, http.StatusForbidden, "The form expired, please reload it.")
 		return nil
