@@ -391,24 +391,29 @@ cluster, so there is no live BGP state. The tests run the full
 flow against a fake OIDC/OAuth provider that enforces PKCE and nonce, and the
 GitHub App client against a fake GitHub API.
 
-### To check before go-live
+### Before go-live
 
-The provider details are unverified; everything marked `CHECK` in the
-example config:
+Verified with real logins on 2026-11-24, on both hosts
+(`autopeer.dn42.oscarr.nl`, and `autopeer.oscrx.dn42` inside DN42):
 
-- **Kioubit** (AS4242423914): the OIDC issuer URL and its client
-  registration (message Kioubit on IRC to activate the domain). Which scope
-  releases the ASN, and the claim name and format for the ASNs.
-- **OAuth.dn42 / iedon** (auth.iedon.net): the exact issuer (discovery
-  path), self-service registration, and whether the ASN is in the
-  ID token or only in userinfo (`useUserinfo`). Also the claim names.
-- **HExpNetwork WebAuth** (AS4242420298): everything (OIDC or not,
-  endpoints, claims, registration).
-- **Auth42 / burble**: OIDC or plain OAuth, endpoints, claim names (subject,
-  ASN), and registration.
-- For all four: does the claim mean "may manage" (`mnt-by`) or only
-  "authenticated as"? Do they support PKCE for confidential clients? Which
-  redirect URIs are allowed (`dn42.oscarr.nl` and `autopeer.oscrx.dn42`)?
+- **Kioubit** (AS4242423914): OIDC, public client with PKCE; ASNs in
+  `dn42.asn`, mntner in `dn42.effective_mnt`.
+- **OAuth.dn42 / iEdon** (`auth.iedon.net`, and `oauth.dn42` for the .dn42
+  host): OIDC, confidential client; ASNs in `dn42.asn`, mntner in
+  `dn42.active_mnt`.
+- **HExpNetwork WebAuth** (AS4242420298): OIDC (the same Auth42 software as
+  OAuth.dn42), public client; same claims.
+
+The claims carry the ASNs the login's mntner may manage (`mnt-by` in the
+registry), which is what autopeer checks. Burble's "Auth42" is not a
+separate provider: it's the software behind OAuth.dn42 and HExpNetwork
+WebAuth.
+
+Still to do before announcing it widely: one peering added and edited by
+someone else than the router's owner. Every real login so far was an admin
+(our own ASN), so the normal-user path (only your own ASNs, the PR waiting
+for the peers repo check, the merge, the tunnel coming up) has only run in
+the tests and `make run-local`.
 
 ## peercheck (CI gate for the peers repo)
 
@@ -441,9 +446,7 @@ versions and `case.yaml` with the diff, author and expected outcome.
 
 ## Not done yet
 
-- autopeer: the provider checks above.
-- Tag a release so the peers repo workflow's pinned
-  `go install .../cmd/peercheck@v0.1.0` resolves (after the repo is public).
+- autopeer: a first peering by someone else (see "Before go-live").
 
 ## CI and releases
 
