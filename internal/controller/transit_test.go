@@ -150,14 +150,18 @@ func TestTransitProber(t *testing.T) {
 		t.Error("peer without a session probed")
 	}
 
-	// Not again right away; confirmed after Confirm.
+	// Not again right away; confirmed after Confirm. A round with nothing
+	// due doesn't touch the steering; one that probes checks it again.
 	now = now.Add(time.Minute)
-	if run() || len(fn.steers) != 2 {
-		t.Error("re-probed before Confirm")
+	if run() || len(fn.steers) != 2 || fn.setups != 1 {
+		t.Errorf("re-probed before Confirm (setups %d)", fn.setups)
 	}
 	now = now.Add(5 * time.Minute)
 	if !run() {
 		t.Error("no verdict after two agreeing probes")
+	}
+	if fn.setups != 2 {
+		t.Errorf("steering not re-checked for the second round: setups %d", fn.setups)
 	}
 	if h := transitOf("baragoon").Healthy; h == nil || *h {
 		t.Fatalf("baragoon verdict %v", h)

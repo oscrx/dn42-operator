@@ -42,7 +42,7 @@ type TransitProber struct {
 	HealthyEvery time.Duration // default 24h
 	BrokenEvery  time.Duration // also for inconclusive results (default 1h)
 
-	ready bool // Net.Setup succeeded
+	ready bool // Net.Setup succeeded at least once (Close on exit)
 }
 
 // NeedLeaderElection is false: runs everywhere, probes only as leader.
@@ -167,7 +167,7 @@ func (p *TransitProber) Run(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
-	changed := false
+	changed, setUp := false, false
 	for i := range list.Items {
 		o := &list.Items[i]
 		if !p.Due(o, p.R.now()) {
@@ -177,11 +177,14 @@ func (p *TransitProber) Run(ctx context.Context) (bool, error) {
 		if verr != nil {
 			continue
 		}
-		if !p.ready {
+		// Every round, not only once: if the rule or the table's
+		// unreachable default went missing, marked probes would take the
+		// normal routes and every peer would look healthy.
+		if !setUp {
 			if err := p.Net.Setup(); err != nil {
 				return changed, err
 			}
-			p.ready = true
+			setUp, p.ready = true, true
 		}
 		checks, err := p.probe(ctx, pp)
 		if err != nil {
